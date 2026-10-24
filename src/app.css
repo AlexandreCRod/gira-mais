@@ -57,3 +57,9 @@ a {
 .maplibregl-ctrl-attrib.maplibregl-compact summary {
   @apply dark:invert;
 }
+/* The expanded attribution wraps before reaching the location button (48px wide,
+   20px from the right edge), instead of covering it. Besides the button and a
+   10px gap, this takes off the control's own 10px margin and 36px of padding. */
+.maplibregl-ctrl-bottom-left > .maplibregl-ctrl-attrib.maplibregl-compact-show {
+  max-width: calc(100vw - 124px);
+}
