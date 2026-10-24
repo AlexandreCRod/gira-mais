@@ -4,6 +4,7 @@
 import { accountInfo, logOut, refreshAccountInfo, token, updateUserInfo, user, userCredentials } from '$lib/account';
 import { reportApiError } from '$lib/error-reporting';
 import { stopBackendSync } from '$lib/gira-api/backend-sync';
+import { setGhostTripHandler } from '$lib/ghost-trip';
 import { currentTrip, DEBUG_TRIP_CODE, tripRating } from '$lib/trip';
 import { setActiveTripRefusalHandler } from '$lib/unlock-fallback';
 import { InvalidCredentialsError, loginWithEmel, refreshVaimooSession } from '$lib/vaimoo-api/client';
@@ -25,7 +26,7 @@ export type SavedAccount = {
 export type SwitchResult = 'ok' | 'invalid-credentials' | 'failed';
 
 export type AccountPickerRequest = {
-	reason: 'switch' | 'active-trip';
+	reason: 'switch' | 'active-trip' | 'ghost-trip';
 	/** Run after a successful switch, e.g. the unlock that the previous account was refused. */
 	retry?: () => Promise<boolean>;
 };
@@ -138,10 +139,16 @@ async function start() {
 		accountPicker.set({ reason: 'active-trip', retry });
 		return true;
 	});
+	setGhostTripHandler(() => {
+		if (!otherAccounts().length || get(switchingTo)) return false;
+		accountPicker.set({ reason: 'ghost-trip' });
+		return true;
+	});
 
 	return () => {
 		unsubscribers.forEach(unsubscribe => unsubscribe());
 		setActiveTripRefusalHandler(null);
+		setGhostTripHandler(null);
 		started = null;
 	};
 }

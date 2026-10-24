@@ -8,6 +8,7 @@ import { errorMessages } from '$lib/ui.svelte';
 import { t } from '$lib/translations';
 import { reportErrorEvent } from '$lib/gira-mais-api/gira-mais-api';
 import { reportApiError } from '$lib/error-reporting';
+import { ghostTripReset, ghostTripSignal, ghostTripStillOpen } from '$lib/ghost-trip';
 
 const PENDING_TRIP_INTERVAL_MS = 3_000;
 const FIRESTORE_START_TRIP_TIMEOUT = 100;
@@ -42,6 +43,8 @@ function scheduleTripCheck(confirmed: boolean) {
 		if (!get(token)) return;
 		try {
 			const serverTrip = await refreshTripStatus('scheduled-poll');
+			// Gira+ Multi: a trip that stays open long after its bike was docked is a ghost trip
+			if (serverTrip) ghostTripStillOpen(serverTrip.id);
 			// The bike document said the trip was over but VAIMOO disagrees; go back to the relaxed cadence.
 			if (serverTrip && tripEndSignalled) {
 				logBackendSync('trip-end-signal-cleared', { tripId: serverTrip.id });
@@ -89,6 +92,7 @@ function followActiveBike(bikeId: string | null) {
 				console.debug('Firestore reports the bike locked with no trip, confirming with VAIMOO');
 				logBackendSync('trip-end-signalled', { bikeId, nextState, tripId: bike.TripId ?? null });
 				tripEndSignalled = true;
+				ghostTripSignal(trip.code);
 				scheduleTripCheck(true);
 				void refreshTripStatus('firestore-locked-no-trip');
 			} else if (previousState !== undefined && previousState !== nextState) {
@@ -146,6 +150,7 @@ export function startBackendSync() {
 				polledTripCode = null;
 				polledTripConfirmed = null;
 				tripEndSignalled = false;
+				ghostTripReset();
 				clearTripTimer();
 				followActiveBike(null);
 				return;
@@ -184,6 +189,7 @@ export function stopBackendSync() {
 	logBackendSync('sync-stopped');
 	clearTripTimer();
 	tripEndSignalled = false;
+	ghostTripReset();
 	stopStationListener?.();
 	stopBikeListener?.();
 	stopTripStoreListener?.();

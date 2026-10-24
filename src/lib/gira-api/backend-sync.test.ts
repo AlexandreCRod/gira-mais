@@ -21,6 +21,7 @@ vi.mock('$lib/error-reporting', () => ({ reportApiError: vi.fn() }));
 
 import { currentTrip } from '$lib/trip';
 import { startBackendSync, stopBackendSync } from './backend-sync';
+import { GHOST_TRIP_AFTER_MS, setGhostTripHandler } from '$lib/ghost-trip';
 
 function trip(confirmed = true): ActiveTrip {
 	return {
@@ -117,5 +118,38 @@ describe('trip status polling', () => {
 		expect(mocks.refreshTripStatus).toHaveBeenCalledTimes(1);
 		await vi.advanceTimersByTimeAsync(3_000);
 		expect(mocks.refreshTripStatus).toHaveBeenCalledTimes(2);
+	});
+
+	it('offers another account when VAIMOO keeps the trip open two minutes after the bike docked', async () => {
+		const offer = vi.fn(() => true);
+		setGhostTripHandler(offer);
+		currentTrip.set(trip());
+		startBackendSync();
+		await Promise.resolve();
+		mocks.refreshTripStatus.mockResolvedValue({ id: '123' });
+		mocks.bikeListener!({ TripVehicleState: 'LOCKED', TripId: null, TripErrorCode: 0 });
+		await vi.advanceTimersByTimeAsync(GHOST_TRIP_AFTER_MS - 1_000);
+		expect(offer).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(15_000);
+		expect(offer).toHaveBeenCalledOnce();
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(offer).toHaveBeenCalledOnce();
+		setGhostTripHandler(null);
+	});
+
+	it('makes no offer when the trip ends after the bike docked', async () => {
+		const offer = vi.fn(() => true);
+		setGhostTripHandler(offer);
+		currentTrip.set(trip());
+		startBackendSync();
+		await Promise.resolve();
+		mocks.bikeListener!({ TripVehicleState: 'LOCKED', TripId: null, TripErrorCode: 0 });
+		mocks.refreshTripStatus.mockImplementation(async () => currentTrip.set(null));
+		await vi.advanceTimersByTimeAsync(3_000);
+		currentTrip.set(trip());
+		mocks.refreshTripStatus.mockResolvedValue({ id: '123' });
+		await vi.advanceTimersByTimeAsync(GHOST_TRIP_AFTER_MS + 15_000);
+		expect(offer).not.toHaveBeenCalled();
+		setGhostTripHandler(null);
 	});
 });

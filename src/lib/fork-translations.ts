@@ -33,6 +33,18 @@ export const forkTranslations = {
 		en: 'Unlock this bike with another account:',
 		pt: 'Desbloquear esta bicicleta com outra conta:',
 	},
+	multi_ghost_trip_title: {
+		en: 'This trip looks stuck',
+		pt: 'Esta viagem parece presa',
+	},
+	multi_ghost_trip_message: {
+		en: 'The bike reports it\'s docked, but EMEL still shows this trip open. Unlock your next bike with another account:',
+		pt: 'A bicicleta indica que está na doca, mas a EMEL ainda mostra esta viagem aberta. Desbloquear a próxima bicicleta com outra conta:',
+	},
+	multi_not_now: {
+		en: 'Not now',
+		pt: 'Agora não',
+	},
 	multi_trip_switch_warning: {
 		en: 'Switching stops tracking the current trip in this app. The trip itself keeps running until the bike is docked.',
 		pt: 'Ao mudar de conta, a viagem atual deixa de ser acompanhada nesta aplicação. A viagem continua até a bicicleta ser devolvida.',

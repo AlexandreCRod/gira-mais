@@ -4,6 +4,7 @@ import type { VaimooSession } from '$lib/vaimoo-api/types';
 import * as account from '$lib/account';
 import * as trip from '$lib/trip';
 import * as fallback from '$lib/unlock-fallback';
+import * as ghost from '$lib/ghost-trip';
 import * as accounts from './accounts';
 import { InvalidCredentialsError } from '$lib/vaimoo-api/client';
 
@@ -266,6 +267,24 @@ describe('unlock refused for an active trip', () => {
 	it('offers nothing with a single account', async () => {
 		const { accounts, fallback } = await setup([ALICE], ALICE);
 		expect(fallback.offerOtherAccounts(async () => true)).toBe(false);
+		expect(get(accounts.accountPicker)).toBeNull();
+	});
+});
+
+describe('ghost trip', () => {
+	afterEach(() => ghost.ghostTripReset());
+
+	it('opens the account picker once the trip counts as a ghost trip', async () => {
+		const { accounts } = await setup([ALICE, BOB], ALICE);
+		ghost.ghostTripSignal('123', 0);
+		ghost.ghostTripStillOpen('123', ghost.GHOST_TRIP_AFTER_MS);
+		expect(get(accounts.accountPicker)).toEqual({ reason: 'ghost-trip' });
+	});
+
+	it('offers nothing with a single account', async () => {
+		const { accounts } = await setup([ALICE], ALICE);
+		ghost.ghostTripSignal('123', 0);
+		ghost.ghostTripStillOpen('123', ghost.GHOST_TRIP_AFTER_MS);
 		expect(get(accounts.accountPicker)).toBeNull();
 	});
 });
