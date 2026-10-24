@@ -1,0 +1,202 @@
+name: Gira+ Multi release
+
+# Gira+ Multi: keeps the multi-account branch on top of upstream's latest release and publishes signed APKs on the fork.
+# Daily, when upstream has published a new release: rebase onto it, test, build, push the branch and publish a release.
+# Run it by hand to publish the branch as it is. Nothing is pushed or published unless every step passed, and a failure
+# opens an issue (or comments on the open one).
+#
+# Secrets: KEYSTORE_B64, ANDROID_STORE_PASSWORD, ANDROID_KEY_PASSWORD, and FORK_PUSH_TOKEN (a fine-grained token for this
+# repository with Contents and Workflows write access: GitHub's own token can't push commits that change workflow files,
+# which upstream's commits may do).
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: multi-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+env:
+  BRANCH: multi-account
+  UPSTREAM_REPO: rt-evil-inc/gira-mais
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  check:
+    name: Look for something to release
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.plan.outputs.go }}
+      rebase: ${{ steps.upstream.outputs.new }}
+      upstream-tag: ${{ steps.upstream.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 0
+
+      - name: Keep the daily schedule alive
+        # GitHub pauses scheduled workflows after 60 days without repository activity; re-enabling resets that
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/$GH_REPO/actions/workflows/multi-release.yml/enable"
+
+      - name: Find upstream's latest release
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release view --repo "$UPSTREAM_REPO" --json tagName --jq .tagName)
+          git fetch --no-tags "https://github.com/$UPSTREAM_REPO.git" "+refs/tags/$tag:refs/tags/$tag"
+          if git merge-base --is-ancestor "$tag" HEAD; then new=false; else new=true; fi
+          echo "Upstream's latest release is $tag; new for this branch: $new"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+
+      - name: Decide
+        id: plan
+        env:
+          NEW_UPSTREAM: ${{ steps.upstream.outputs.new }}
+        run: |
+          go=false
+          if [ "$NEW_UPSTREAM" = true ]; then
+            go=true
+          elif [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            released=$(git tag --points-at HEAD | grep -- '-multi\.' | head -n 1 || true)
+            if [ -n "$released" ]; then
+              echo "::notice::This commit was already released as $released; nothing new to publish."
+            else
+              go=true
+            fi
+          fi
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Rebase, test, build and publish
+    needs: check
+    if: needs.check.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      conflicts: ${{ steps.rebase.outputs.conflicts }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 0
+          token: ${{ secrets.FORK_PUSH_TOKEN || github.token }}
+
+      - name: Rebase onto upstream's release
+        id: rebase
+        if: needs.check.outputs.rebase == 'true'
+        env:
+          UPSTREAM_TAG: ${{ needs.check.outputs.upstream-tag }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags "https://github.com/$UPSTREAM_REPO.git" "+refs/tags/$UPSTREAM_TAG:refs/tags/$UPSTREAM_TAG"
+          echo "before=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          if ! git rebase "$UPSTREAM_TAG"; then
+            { echo 'conflicts<<EOF'; git diff --name-only --diff-filter=U; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+            git rebase --abort
+            echo "::error::Rebasing onto $UPSTREAM_TAG conflicts"
+            exit 1
+          fi
+
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+
+      # The same checks as upstream's own CI, so the fork never blocks on something upstream ships with
+      - name: Test
+        run: bunx vitest run
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Create the keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then echo '::error::The KEYSTORE_B64 secret is missing'; exit 1; fi
+          echo "$KEYSTORE_B64" | base64 -d > android/key.keystore
+
+      - name: Stamp the release version
+        id: version
+        run: node scripts/multi-release.js
+
+      - name: Build the web app
+        env:
+          GIRA_RELEASE: 'true'
+        run: |
+          bun run build
+          bunx cap sync android
+
+      - name: Build the signed APK
+        working-directory: android
+        env:
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
+
+      - name: Name the APK
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # An unsigned build would be called app-release-unsigned.apk
+          mv android/app/build/outputs/apk/release/app-release.apk "GiraMulti-$VERSION.apk"
+
+      - name: Push the rebased branch
+        if: needs.check.outputs.rebase == 'true'
+        env:
+          BEFORE: ${{ steps.rebase.outputs.before }}
+        run: git push --force-with-lease="$BRANCH:$BEFORE" origin "HEAD:$BRANCH"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          base="${VERSION%-multi.*}"
+          notes="Gira+ with multiple saved accounts, built on [Gira+ v$base](https://github.com/$UPSTREAM_REPO/releases/tag/v$base).
+          What this fork changes: [MULTI_ACCOUNT.md](https://github.com/$GH_REPO/blob/$TAG/MULTI_ACCOUNT.md)."
+          gh release create "$TAG" "GiraMulti-$VERSION.apk" --target "$(git rev-parse HEAD)" --title "Gira+ Multi $VERSION" --notes "$notes" --latest
+
+  report:
+    name: Report a failure
+    needs: [check, release]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open or update the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ needs.check.outputs.upstream-tag }}
+          CONFLICTS: ${{ needs.release.outputs.conflicts }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='Automatic release failed'
+          if [ -n "$CONFLICTS" ]; then
+            body="Rebasing \`$BRANCH\` onto upstream's $UPSTREAM_TAG conflicts in:
+          $(printf '%s\n' "$CONFLICTS" | sed 's/^/- /')
+
+          Nothing was pushed or published. The rebase needs doing by hand. Run: $RUN_URL"
+          else
+            body="The release run failed (upstream release: ${UPSTREAM_TAG:-unknown}). Nothing was pushed or published unless the log says otherwise. Run: $RUN_URL"
+          fi
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
