@@ -89,6 +89,10 @@ export const forkTranslations = {
 		en: 'Remove',
 		pt: 'Remover',
 	},
+	multi_close_menu: {
+		en: 'Close',
+		pt: 'Fechar',
+	},
 	multi_paid_only: {
 		en: 'Paid only',
 		pt: 'Só pagas',

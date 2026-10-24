@@ -15,6 +15,7 @@ Download the APK from [Releases](../../releases), or add this repository's URL t
 - **Trip screen.** During a trip, a button offers the same switch, with a warning that the trip stops being tracked in the app.
 - **Ghost-trip offer.** It uses Gira+'s own trip-end signal: the bike document says `LOCKED` with no trip id, and Gira+ then checks with VAIMOO. If VAIMOO still shows the trip open 2 minutes later on Gira+'s regular polls, the account picker opens once with "This trip looks stuck" and a "Not now" button. It makes no extra requests and reports nothing.
 - **Main account.** Pressing and holding an account in the list makes it the one the app opens on, marked by a small "Main" line above its name. Holding it again turns this off. At startup, before Gira+ logs in, the fork points Gira+'s saved login at that account. Gira+ still logs in once, so opening is no slower and nothing switches afterwards. If a trip on another account was still running when the app closed (its bike not yet docked), that start opens on that account instead.
+- **Quick switch from the map.** Holding the map's profile button opens a small menu under it with the saved accounts and their labels; tapping one switches, with the same trip warning as the profile list. A tap still opens the profile, and back or a tap outside closes the menu. Only with two or more accounts.
 - **Account labels.** "Trip running", and "Pass expired" or "No pass" appear under each account in the list and in the switch popups. The active account's labels come from what the app already knows. Each other account is checked when a list is shown, at most once every 3 minutes, using the same three requests Gira+ makes for the active account: session refresh, current trip, and pass.
 - **Safe switching.** A switch first waits (up to 10 seconds) for a token refresh or trip check of the previous account that's already under way. Otherwise that request could land after the switch and put the previous account back.
 - **Smooth switch.** The new account's pass and balance are loaded during the switch, with the same two requests Gira+ makes for the active account, so the profile header shows them together with the name instead of a "—" first. The header then fades in. If that load fails or takes over 3 seconds, the switch goes ahead and Gira+'s own refresh fills them in as before.
@@ -36,10 +37,11 @@ Fork code lives in new files, so rebasing onto upstream releases stays cheap:
 | `src/lib/account-labels.ts` | Checks the other accounts' trip and pass for the labels, at most every 3 minutes |
 | `src/lib/account-snapshot.ts` | Gira+'s pass and balance snapshot for any account, loaded before a switch |
 | `src/lib/account-fade.ts` | Fades the profile header in when the account changes |
+| `src/lib/account-menu.ts` | Where the map's account menu opens, and closing it |
 | `src/lib/paid-trips.ts` | What counts as a paid trip, the cost format, and the auto-loading loop |
 | `src/lib/fork.ts` | Release URLs and version ordering for this fork |
 | `src/lib/fork-translations.ts` | The fork's own strings (pt/en) |
-| `src/lib/components/AccountPicker.svelte`, `AccountPickerHost.svelte`, `AccountSwitcher.svelte`, `AccountLabels.svelte`, `MainCaption.svelte`, `TripAccountButton.svelte`, `TripCost.svelte`, `PaidOnlySwitch.svelte`, `PaidTripsLoader.svelte`, and `src/lib/hold.ts` (press and hold) | The account UI |
+| `src/lib/components/AccountPicker.svelte`, `AccountPickerHost.svelte`, `AccountSwitcher.svelte`, `AccountLabels.svelte`, `MainCaption.svelte`, `TripAccountButton.svelte`, `TripCost.svelte`, `PaidOnlySwitch.svelte`, `PaidTripsLoader.svelte`, `AccountHold.svelte`, `AccountMenu.svelte`, and `src/lib/hold.ts` (press and hold) | The account UI |
 | `scripts/multi-release.js` | Stamps the release version at build time |
 | `.github/workflows/multi-release.yml` | Rebases onto new upstream releases and publishes signed APKs |
 
@@ -57,11 +59,12 @@ Upstream files only get small hooks:
 | `src/lib/components/settings/History.svelte` | "Paid only" switch next to the title, the filter on the list, the auto-loader, and hiding the loading bikes while it waits for "Look further back" |
 | `src/lib/components/settings/HistoryItem.svelte` | The cost under the bike number |
 | `src/lib/components/InfoDialog.svelte` | Update check uses `src/lib/fork.ts` |
-| `src/routes/+page.svelte` | Trip-screen button and the account picker host |
+| `src/routes/+page.svelte` | Trip-screen button, the account picker host, the account menu (wrapping the profile button in `AccountHold`, and the back button closing the menu first) |
 | `src/lib/translations.ts` | Merges the fork's strings |
 | `src/lib/settings.ts` | Analytics off by default |
 | `capacitor.config.json`, `android/app/build.gradle`, `android/app/src/main/res/values/strings.xml`, `scripts/build.js` | App id and name |
 | `android/app/src/main/AndroidManifest.xml` | Backups off |
+| `src/app.css` | The map credits strip wraps before the location button instead of covering it. Not fork-specific: offered to Gira+ as its own change. If Gira+ takes it as is, the rebase drops this commit by itself. |
 
 ## Releases
 
@@ -78,6 +81,7 @@ A daily GitHub Action checks for a new Gira+ release. When there is one, it reba
 - Main account, account labels, and safe switching (the fix for a switch occasionally landing back on the previous account).
 - Smooth switch: pass and balance loaded before the switch, and a fade on the profile header.
 - Paid trips in the history: the cost on paid trips and a "Paid only" switch.
+- Larger "Paid only" switch; quick switch by holding the map's profile button; the map credits strip no longer covers the location button.
 
 ## Guesses and assumptions
 

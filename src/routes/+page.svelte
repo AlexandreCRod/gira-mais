@@ -32,6 +32,9 @@
 	import { startArrivalSharing } from '$lib/arrival-sharing';
 	import AccountPickerHost from '$lib/components/AccountPickerHost.svelte';
 	import TripAccountButton from '$lib/components/TripAccountButton.svelte';
+	import AccountHold from '$lib/components/AccountHold.svelte';
+	import AccountMenu from '$lib/components/AccountMenu.svelte';
+	import { closeAccountMenu } from '$lib/account-menu';
 
 	let backListener: PluginListenerHandle;
 	let innerHeight = $state(0);
@@ -71,7 +74,7 @@
 		});
 
 		App.addListener('backButton', () => {
-			if (!profileOpen) {
+			if (!profileOpen && !closeAccountMenu()) {
 				if (dismissSearchBar()) {
 				// just unfocus the search bar
 				} else if ($selectedStation != null) {
@@ -126,7 +129,7 @@
 	</Floating>
 
 	<Floating right={16} y={tripStatusHeight} offset={16}>
-		<ProfileButton onclick={() => profileOpen = true}/>
+		<AccountHold><ProfileButton onclick={() => profileOpen = true}/></AccountHold>
 	</Floating>
 
 	<Floating right={20} y={Math.max(tripStatusHeight + 16, $safeInsets.top)} offset={70}>
@@ -151,6 +154,7 @@
 	{/if}
 	<Dialog />
 	<AccountPickerHost />
+	<AccountMenu />
 </div>
 
 <InfoDialog />
