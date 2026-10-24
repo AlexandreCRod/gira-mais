@@ -1,6 +1,7 @@
 // Gira+ Multi: "trip running" and pass labels for the saved accounts. The active account's come from what the app
 // already loaded; each other account is asked by VAIMOO only when a list of accounts is shown, and at most once every
 // LABEL_MAX_AGE_MS, with the same requests Gira+ makes for the active account (session refresh, trip, pass).
+import { isUsageExpired } from '$lib/account-snapshot';
 import { otherAccounts, rememberSession, sameEmail, signIn, switchingTo } from '$lib/accounts';
 import { getCurrentVaimooTrip, getVaimooSubscriptionUsage } from '$lib/vaimoo-api/client';
 import type { VaimooCurrentTrip, VaimooSubscriptionUsage } from '$lib/vaimoo-api/types';
@@ -22,8 +23,7 @@ export const hasRunningTrip = (trip: VaimooCurrentTrip) => trip.activeTripId != 
 /** Same rule as upstream's getAccountSnapshot: a pass counts while any of its usages hasn't expired. */
 export function passState(usage: VaimooSubscriptionUsage[], now = Date.now()): PassState {
 	if (!usage.length) return 'none';
-	const isExpired = (item: VaimooSubscriptionUsage) => item.isExpired ?? new Date(item.expirationDate).getTime() <= now;
-	return usage.some(item => !isExpired(item)) ? 'valid' : 'expired';
+	return usage.some(item => !isUsageExpired(item, now)) ? 'valid' : 'expired';
 }
 
 let running: Promise<void> | null = null;

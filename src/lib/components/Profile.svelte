@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { accountInfo, user } from '$lib/account';
+	import { fadeOnAccountChange } from '$lib/account-fade';
 	import { signOutActive } from '$lib/accounts';
 	import AccountSwitcher from '$lib/components/AccountSwitcher.svelte';
 	import Metric from '$lib/components/Metric.svelte';
@@ -56,7 +57,7 @@
 			style:padding-top="{Math.max($safeInsets.top, 16)}px" style:padding-bottom="{Math.max($safeInsets.bottom, 24)}px"
 		>
 			<div class="flex flex-col grow justify-center items-center w-full gap-10 pt-9">
-				<div class="flex flex-col justify-center items-center w-full gap-6">
+				<div class="flex flex-col justify-center items-center w-full gap-6" use:fadeOnAccountChange>
 					<div class="flex flex-col items-center">
 						<div class="font-bold text-primary text-3xl text-center leading-none">
 							{$user?.name ? `${$user.name.split(' ').shift()}${$user.name.includes(' ') ? ` ${$user.name.split(' ').pop()}` : ''}` : $t('user_label')}

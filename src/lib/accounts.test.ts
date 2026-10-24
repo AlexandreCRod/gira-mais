@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
 	logOut: vi.fn(),
 	refreshInFlight: null as Promise<unknown> | null,
 	statusInFlight: null as Promise<unknown> | null,
+	remainingCredit: vi.fn(async () => ({ remainingCredit: 4.5 })),
+	subscriptionUsage: vi.fn(async () => [] as unknown[]),
 }));
 
 vi.mock('@capacitor/preferences', () => ({
@@ -57,7 +59,14 @@ vi.mock('$lib/vaimoo-api/client', () => {
 		errors = [];
 	}
 	class InvalidCredentialsError extends VaimooApiError {}
-	return { VaimooApiError, InvalidCredentialsError, loginWithEmel: mocks.loginWithEmel, refreshVaimooSession: mocks.refreshVaimooSession };
+	return {
+		VaimooApiError,
+		InvalidCredentialsError,
+		loginWithEmel: mocks.loginWithEmel,
+		refreshVaimooSession: mocks.refreshVaimooSession,
+		getVaimooRemainingCredit: mocks.remainingCredit,
+		getVaimooSubscriptionUsage: mocks.subscriptionUsage,
+	};
 });
 
 const ALICE = { email: 'alice@example.com', password: 'alice-pass', name: 'Alice', userId: 1, refreshToken: 'alice-refresh' };
@@ -162,6 +171,42 @@ describe('switchAccount', () => {
 		expect(get(account.user)).toEqual({ email: BOB.email, name: 'User 2' });
 		expect(get(accounts.savedAccounts)[1].refreshToken).toBe('refresh-2-new');
 		expect(get(accounts.savedAccounts)[0].refreshToken).toBe('alice-refresh');
+	});
+
+	it('loads the pass and balance of the new account before showing it, so they change with the name', async () => {
+		const { account, accounts } = await setup([ALICE, BOB], ALICE);
+		mocks.refreshVaimooSession.mockResolvedValue(session(2, BOB.email));
+
+		expect(await accounts.switchAccount(BOB.email)).toBe('ok');
+		expect(mocks.remainingCredit).toHaveBeenCalledWith(expect.objectContaining({ userId: 2 }));
+		expect(get(account.accountInfo)).toEqual({ balance: 4.5, subscription: null });
+		expect(account.refreshAccountInfo).not.toHaveBeenCalled();
+	});
+
+	it('falls back to the pass and balance refresh of Gira+ when the preload fails', async () => {
+		const { account, accounts } = await setup([ALICE, BOB], ALICE);
+		mocks.refreshVaimooSession.mockResolvedValue(session(2, BOB.email));
+		mocks.remainingCredit.mockRejectedValueOnce(new Error('offline'));
+
+		expect(await accounts.switchAccount(BOB.email)).toBe('ok');
+		expect(get(account.accountInfo)).toBeNull();
+		expect(account.refreshAccountInfo).toHaveBeenCalled();
+	});
+
+	it('does not hold the switch up for more than 3 seconds waiting for the pass and balance', async () => {
+		const { account, accounts } = await setup([ALICE, BOB], ALICE);
+		mocks.refreshVaimooSession.mockResolvedValue(session(2, BOB.email));
+		mocks.remainingCredit.mockReturnValueOnce(new Promise(() => {}));
+		vi.useFakeTimers();
+		try {
+			const result = accounts.switchAccount(BOB.email);
+			await vi.advanceTimersByTimeAsync(3_000);
+			expect(await result).toBe('ok');
+		} finally {
+			vi.useRealTimers();
+		}
+		expect(get(account.token)).toMatchObject({ userId: 2 });
+		expect(account.refreshAccountInfo).toHaveBeenCalled();
 	});
 
 	it('logs in again when the saved session has expired', async () => {

@@ -2,8 +2,10 @@
 // $lib/account exactly as upstream keeps it (one token, one set of credentials); this module keeps the
 // others next to it and swaps them in, so upstream's login and token refresh code stays untouched.
 import { accountInfo, logOut, refreshAccountInfo, token, tokenRefreshInFlight, updateUserInfo, user, userCredentials } from '$lib/account';
+import { accountSnapshotFor } from '$lib/account-snapshot';
 import { reportApiError } from '$lib/error-reporting';
 import { stopBackendSync } from '$lib/gira-api/backend-sync';
+import type { AccountSnapshot } from '$lib/gira-api/models';
 import { setGhostTripHandler, setTripDockedListener } from '$lib/ghost-trip';
 import { currentTrip, DEBUG_TRIP_CODE, tripRating, tripStatusInFlight } from '$lib/trip';
 import { setActiveTripRefusalHandler } from '$lib/unlock-fallback';
@@ -37,6 +39,7 @@ const MAIN_KEY = 'multi/mainAccount';
 const TRIP_ACCOUNT_KEY = 'multi/tripAccount';
 /** How long a switch waits for a token refresh or trip check of the previous account that is already under way. */
 const SETTLE_TIMEOUT_MS = 10_000;
+const SNAPSHOT_WAIT_MS = 3_000;
 
 export const savedAccounts = writable<SavedAccount[]>([]);
 /** The email of the account the app opens on; null keeps upstream's "the last one used". */
@@ -250,24 +253,36 @@ async function settleActiveSession() {
 	}
 }
 
+/** The new account's pass and balance, or null when they can't be had within SNAPSHOT_WAIT_MS. */
+async function preloadSnapshot(session: VaimooSession): Promise<AccountSnapshot | null> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const late = new Promise<null>(resolve => timer = setTimeout(() => resolve(null), SNAPSHOT_WAIT_MS));
+	try {
+		return await Promise.race([accountSnapshotFor(session).catch(() => null), late]);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 /** Set while activate() swaps the stores, so clearing the previous account's trip doesn't count as the trip ending. */
 let activating = false;
 
 /** Make the account active, the way logging out and back in would but without the login screen in between. */
-function activate(account: SavedAccount, session: VaimooSession) {
+function activate(account: SavedAccount, session: VaimooSession, snapshot: AccountSnapshot | null = null) {
 	activating = true;
 	try {
-		swapIn(account, session);
+		swapIn(account, session, snapshot);
 	} finally {
 		activating = false;
 	}
 }
 
-function swapIn(account: SavedAccount, session: VaimooSession) {
+/** With a snapshot loaded beforehand, the profile's pass and balance change together with the name, without a gap. */
+function swapIn(account: SavedAccount, session: VaimooSession, snapshot: AccountSnapshot | null) {
 	stopBackendSync();
 	currentTrip.set(null);
 	tripRating.set({ currentRating: null });
-	accountInfo.set(null);
+	accountInfo.set(snapshot);
 	userCredentials.set({ email: account.email, password: account.password });
 	// Setting the token restarts the backend sync, which loads this account's active trip
 	token.set({
@@ -277,11 +292,14 @@ function swapIn(account: SavedAccount, session: VaimooSession) {
 		userId: session.userId,
 		tenantId: session.user.tenantId,
 	});
-	user.set({ email: session.user.email ?? account.email, name: displayName(session, account.email) });
-	void refreshAccountInfo().catch(error => {
-		console.error('Failed to load VAIMOO account data', error);
-		void reportApiError('account_info_error', error, { source: 'account-switch' });
-	});
+	// The saved name stands in until updateUserInfo loads it, so it doesn't flash the email first
+	user.set({ email: session.user.email ?? account.email, name: displayName(session, account.name || account.email) });
+	if (!snapshot) {
+		void refreshAccountInfo().catch(error => {
+			console.error('Failed to load VAIMOO account data', error);
+			void reportApiError('account_info_error', error, { source: 'account-switch' });
+		});
+	}
 	void updateUserInfo().catch(error => {
 		console.error('Failed to load VAIMOO user data', error);
 		void reportApiError('user_info_error', error, { source: 'account-switch' });
@@ -303,8 +321,9 @@ export async function switchAccount(email: string): Promise<SwitchResult> {
 			return 'failed';
 		}
 		upsert({ email: target.email, userId: session.userId, refreshToken: session.refreshToken });
-		await settleActiveSession();
-		activate(target, session);
+		// Load the pass and balance meanwhile; without them the switch still happens and loads them afterwards
+		const [snapshot] = await Promise.all([preloadSnapshot(session), settleActiveSession()]);
+		activate(target, session, snapshot);
 		return 'ok';
 	} finally {
 		switchingTo.set(null);
