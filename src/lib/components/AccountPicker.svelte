@@ -1,7 +1,11 @@
 <script lang="ts">
 	// Gira+ Multi: pick another saved account, either to switch to it or to retry an unlock this account was refused
 	import { userCredentials } from '$lib/account';
-	import { otherAccounts, savedAccounts, switchAccount, switchingTo, tripInProgress, type AccountPickerRequest } from '$lib/accounts';
+	import { refreshAccountLabels } from '$lib/account-labels';
+	import { mainAccount, otherAccounts, sameEmail, savedAccounts, switchAccount, switchingTo, tripInProgress, type AccountPickerRequest } from '$lib/accounts';
+	import AccountLabels from '$lib/components/AccountLabels.svelte';
+	import MainCaption from '$lib/components/MainCaption.svelte';
+	import { onMount } from 'svelte';
 	import { t } from '$lib/translations';
 	import { currentTrip } from '$lib/trip';
 	import { IconLoader2 } from '@tabler/icons-svelte';
@@ -20,6 +24,8 @@
 	const accounts = $derived(otherAccounts($savedAccounts, $userCredentials?.email ?? null));
 	const warnAboutTrip = $derived(request.reason === 'switch' && $currentTrip !== null && tripInProgress());
 	let error = $state('');
+
+	onMount(() => void refreshAccountLabels());
 
 	async function choose(email: string) {
 		error = '';
@@ -58,10 +64,14 @@
 					<IconUserCircle class="text-primary shrink-0" size={28} stroke={1.75} />
 				{/if}
 				<div class="min-w-0">
+					{#if $mainAccount !== null && sameEmail($mainAccount, account.email)}
+						<MainCaption />
+					{/if}
 					<div class="font-bold text-info truncate">{account.name}</div>
 					{#if account.name !== account.email}
 						<div class="text-xs font-semibold text-label truncate">{account.email}</div>
 					{/if}
+					<AccountLabels email={account.email} active={false} />
 				</div>
 			</button>
 		{/each}

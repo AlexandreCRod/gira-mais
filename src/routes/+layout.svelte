@@ -14,6 +14,7 @@
 	import '../app.css';
 	import { App } from '@capacitor/app';
 	import { loadUserCreds, refreshToken, token } from '$lib/account';
+	import { chooseStartupAccount } from '$lib/accounts';
 	import { refreshTripStatus } from '$lib/trip';
 	import { ScreenOrientation } from '@capacitor/screen-orientation';
 	import { loadSettings } from '$lib/settings';
@@ -61,7 +62,8 @@
 
 	onMount(() => {
 		const stopDebugControls = import.meta.env.DEV ? startDebugControls() : undefined;
-		loadUserCreds();
+		// Gira+ Multi: first point the saved login at the account to open on (local storage only, no network)
+		void chooseStartupAccount().then(loadUserCreds);
 		loadSettings().then(() => {
 			reportAppUsageEvent();
 			appSettings.subscribe(() => {

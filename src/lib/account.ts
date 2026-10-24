@@ -242,3 +242,6 @@ export async function refreshAccountInfo() {
 	accountInfo.set(snapshot);
 	return snapshot;
 }
+
+// Gira+ Multi: lets an account switch wait for a token refresh that is already under way
+export const tokenRefreshInFlight = () => refreshRequest;

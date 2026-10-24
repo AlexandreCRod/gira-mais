@@ -14,6 +14,9 @@ Download the APK from [Releases](../../releases), or add this repository's URL t
 - **Unlock fallback.** When VAIMOO refuses an unlock because the account already has a trip (error 1607), the app offers the other saved accounts and retries the same bike with the one picked.
 - **Trip screen.** During a trip, a button offers the same switch, with a warning that the trip stops being tracked in the app.
 - **Ghost-trip offer.** It uses Gira+'s own trip-end signal: the bike document says `LOCKED` with no trip id, and Gira+ then checks with VAIMOO. If VAIMOO still shows the trip open 2 minutes later on Gira+'s regular polls, the account picker opens once with "This trip looks stuck" and a "Not now" button. It makes no extra requests and reports nothing.
+- **Main account.** Pressing and holding an account in the list makes it the one the app opens on, marked by a small "Main" line above its name. Holding it again turns this off. At startup, before Gira+ logs in, the fork points Gira+'s saved login at that account. Gira+ still logs in once, so opening is no slower and nothing switches afterwards. If a trip on another account was still running when the app closed (its bike not yet docked), that start opens on that account instead.
+- **Account labels.** "Trip running", and "Pass expired" or "No pass" appear under each account in the list and in the switch popups. The active account's labels come from what the app already knows. Each other account is checked when a list is shown, at most once every 3 minutes, using the same three requests Gira+ makes for the active account: session refresh, current trip, and pass.
+- **Safe switching.** A switch first waits (up to 10 seconds) for a token refresh or trip check of the previous account that's already under way. Otherwise that request could land after the switch and put the previous account back.
 - **Login form.** Autofill hints (`username` / `current-password`). The same form is reused as the add-account screen.
 - **Own identity.** App id `io.github.alexandrecrod.giramais`, name "Gira+ Multi". The update check points at this fork, and its versions order as `1.7.1 < 1.7.1-multi.1 < 1.7.1-multi.2 < 1.7.2`.
 - **Analytics off by default**, so this build's reports don't mix with Gira+'s. Bike ratings and arrival sharing are unchanged.
@@ -28,9 +31,10 @@ Fork code lives in new files, so rebasing onto upstream releases stays cheap:
 | `src/lib/accounts.ts` | Saved accounts, switching, adding and removing |
 | `src/lib/unlock-fallback.ts` | Recognises the "already has a trip" refusal and hands the retry to the account picker |
 | `src/lib/ghost-trip.ts` | Turns Gira+'s trip-end signal plus VAIMOO still holding the trip into the ghost-trip offer |
+| `src/lib/account-labels.ts` | Checks the other accounts' trip and pass for the labels, at most every 3 minutes |
 | `src/lib/fork.ts` | Release URLs and version ordering for this fork |
 | `src/lib/fork-translations.ts` | The fork's own strings (pt/en) |
-| `src/lib/components/AccountPicker.svelte`, `AccountPickerHost.svelte`, `AccountSwitcher.svelte`, `TripAccountButton.svelte` | The account UI |
+| `src/lib/components/AccountPicker.svelte`, `AccountPickerHost.svelte`, `AccountSwitcher.svelte`, `AccountLabels.svelte`, `MainCaption.svelte`, `TripAccountButton.svelte`, and `src/lib/hold.ts` (press and hold) | The account UI |
 | `scripts/multi-release.js` | Stamps the release version at build time |
 | `.github/workflows/multi-release.yml` | Rebases onto new upstream releases and publishes signed APKs |
 
@@ -40,6 +44,9 @@ Upstream files only get small hooks:
 | --- | --- |
 | `src/lib/trip.ts` | On error 1607, offer the other accounts before showing the error |
 | `src/lib/gira-api/backend-sync.ts` | Passes the trip-end signal, the regular poll results and the resets to `ghost-trip.ts` (5 lines) |
+| `src/lib/account.ts`, end of file | Exposes the token refresh under way, so a switch can wait for it |
+| `src/lib/trip.ts`, end of file | Exposes the trip check under way, for the same reason |
+| `src/routes/+layout.svelte` | Runs `chooseStartupAccount` just before `loadUserCreds` |
 | `src/lib/components/Login.svelte` | Autofill hints; optional title and login handler for the add-account screen |
 | `src/lib/components/Profile.svelte` | Account switcher; sign-out goes through the saved accounts |
 | `src/lib/components/InfoDialog.svelte` | Update check uses `src/lib/fork.ts` |
@@ -61,6 +68,7 @@ A daily GitHub Action checks for a new Gira+ release. When there is one, it reba
 - Saved accounts and switching, unlock fallback on error 1607, trip-screen switch button, login autofill hints.
 - Signed releases that follow upstream automatically, Android backups off.
 - Ghost-trip offer.
+- Main account, account labels, and safe switching (the fix for a switch occasionally landing back on the previous account).
 
 ## Guesses and assumptions
 
@@ -76,10 +84,14 @@ These things were decided without confirmation from EMEL, VAIMOO or Gira+. Each 
 | Re-enabling the workflow through GitHub's API each day stops GitHub pausing it after 60 days. This is the common keepalive approach, not verified here. | "Keep the daily schedule alive" step in `multi-release.yml` |
 | Upstream's versionCode keeps increasing, and no upstream version gets more than 99 fork releases. | `scripts/multi-release.js` |
 | Obtainium matches the release tag `v1.7.1-multi.1` to the app's version `1.7.1-multi.1`. | Release tag format in `multi-release.yml` |
+| A token refresh or trip check of the previous account rarely takes over 10 seconds, so a switch never needs to wait longer. | `SETTLE_TIMEOUT_MS` in `src/lib/accounts.ts` |
+| Gira+ keeps its saved login under the `email` and `password` storage keys and reads them once at startup. If upstream changes that, opening on the main account quietly stops working, with no rebase conflict to warn about. | `chooseStartupAccount` in `src/lib/accounts.ts` |
+| The "trip still running" memory is used for one start only. If the app restarts mid-ride while offline, the next start after that opens on the main account. | `chooseStartupAccount` in `src/lib/accounts.ts` |
+| The labels use the same rules as Gira+ (a trip counts when `activeTripId` > 0; a pass counts while any usage hasn't expired). They're copied, not shared, because Gira+'s versions only work for the active account. | `hasRunningTrip` and `passState` in `src/lib/account-labels.ts` |
+| Checking the other accounts at most every 3 minutes, only when a list is shown, is light enough for EMEL. How EMEL views several accounts checked from one phone is unknown. | `LABEL_MAX_AGE_MS` in `src/lib/account-labels.ts` |
 | `allowBackup="false"` keeps saved passwords out of Google cloud backups. On Android 12+, a direct phone-to-phone transfer may still copy app data (not checked). | `android/app/src/main/AndroidManifest.xml` |
 
 ## Known limits
 
-- If a background token refresh lands at the exact moment of a switch, the app can end up on the previous account's session. Switching again fixes it.
 - The login screen still says "Welcome to Gira+".
 - Nothing is reported to EMEL. A ghost trip stays on its account until EMEL closes it.

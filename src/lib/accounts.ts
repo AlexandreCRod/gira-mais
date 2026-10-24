@@ -1,11 +1,11 @@
 // Gira+ Multi: several saved accounts and switching between them. The active account still lives in
 // $lib/account exactly as upstream keeps it (one token, one set of credentials); this module keeps the
 // others next to it and swaps them in, so upstream's login and token refresh code stays untouched.
-import { accountInfo, logOut, refreshAccountInfo, token, updateUserInfo, user, userCredentials } from '$lib/account';
+import { accountInfo, logOut, refreshAccountInfo, token, tokenRefreshInFlight, updateUserInfo, user, userCredentials } from '$lib/account';
 import { reportApiError } from '$lib/error-reporting';
 import { stopBackendSync } from '$lib/gira-api/backend-sync';
-import { setGhostTripHandler } from '$lib/ghost-trip';
-import { currentTrip, DEBUG_TRIP_CODE, tripRating } from '$lib/trip';
+import { setGhostTripHandler, setTripDockedListener } from '$lib/ghost-trip';
+import { currentTrip, DEBUG_TRIP_CODE, tripRating, tripStatusInFlight } from '$lib/trip';
 import { setActiveTripRefusalHandler } from '$lib/unlock-fallback';
 import { InvalidCredentialsError, loginWithEmel, refreshVaimooSession } from '$lib/vaimoo-api/client';
 import type { VaimooSession } from '$lib/vaimoo-api/types';
@@ -32,8 +32,15 @@ export type AccountPickerRequest = {
 };
 
 const STORAGE_KEY = 'multi/accounts';
+const MAIN_KEY = 'multi/mainAccount';
+/** The account with a trip running whose bike hasn't been docked yet; the next start opens on it instead of the main one. */
+const TRIP_ACCOUNT_KEY = 'multi/tripAccount';
+/** How long a switch waits for a token refresh or trip check of the previous account that is already under way. */
+const SETTLE_TIMEOUT_MS = 10_000;
 
 export const savedAccounts = writable<SavedAccount[]>([]);
+/** The email of the account the app opens on; null keeps upstream's "the last one used". */
+export const mainAccount = writable<string | null>(null);
 /** The email being switched to, while a switch is in progress. */
 export const switchingTo = writable<string | null>(null);
 /** Asks AccountPickerHost to show the account picker. */
@@ -92,6 +99,38 @@ function displayName(session: VaimooSession, email: string) {
 	return [session.user.firstName, session.user.lastName].filter(Boolean).join(' ') || session.user.userName || email;
 }
 
+function store(key: string, value: string | null) {
+	return value ? Preferences.set({ key, value }) : Preferences.remove({ key });
+}
+
+let tripAccount: string | null = null;
+function setTripAccount(email: string | null) {
+	if (email === tripAccount) return;
+	tripAccount = email;
+	void store(TRIP_ACCOUNT_KEY, email);
+}
+
+/**
+ * Runs before upstream's loadUserCreds at app start and points its saved login at the account to open on: the one
+ * whose trip was still running, otherwise the main one. Upstream then logs in once, as it always does, just with
+ * that account, so opening is no slower. Logged out stays logged out.
+ */
+export async function chooseStartupAccount() {
+	try {
+		const read = (key: string) => Preferences.get({ key }).then(result => result.value);
+		const [stored, main, runningTripAccount, last] = await Promise.all([STORAGE_KEY, MAIN_KEY, TRIP_ACCOUNT_KEY, 'email'].map(read));
+		// Used for this start only: if the trip is still running, following it again sets it back
+		if (runningTripAccount) await Preferences.remove({ key: TRIP_ACCOUNT_KEY });
+		const target = runningTripAccount ?? main;
+		if (!last || !target || sameEmail(target, last)) return;
+		const account = parse(stored).find(saved => sameEmail(saved.email, target));
+		if (!account) return;
+		await Promise.all([Preferences.set({ key: 'email', value: account.email }), Preferences.set({ key: 'password', value: account.password })]);
+	} catch (error) {
+		console.error('Choosing the account to open on failed', error);
+	}
+}
+
 let started: Promise<() => void> | null = null;
 
 /**
@@ -104,15 +143,38 @@ export function initAccounts() {
 }
 
 async function start() {
-	const { value } = await Preferences.get({ key: STORAGE_KEY });
-	savedAccounts.set(parse(value));
+	const [stored, main] = await Promise.all([STORAGE_KEY, MAIN_KEY].map(key => Preferences.get({ key }).then(result => result.value)));
+	savedAccounts.set(parse(stored));
+	mainAccount.set(main || null);
+	// chooseStartupAccount has used up the stored one; following a trip sets it again
+	tripAccount = null;
 
-	// Skip only the initial call, which hands back what was just loaded
+	// Skip only the initial calls, which hand back what was just loaded
 	let loaded = false;
 	const stopSaving = savedAccounts.subscribe(accounts => {
 		if (loaded) void Preferences.set({ key: STORAGE_KEY, value: JSON.stringify(accounts) });
 	});
+	const stopSavingMain = mainAccount.subscribe(email => {
+		if (loaded) void store(MAIN_KEY, email);
+	});
 	loaded = true;
+
+	// Remember the account whose trip is running until its bike is docked or the trip ends, so that a restart
+	// mid-trip opens on it rather than on the main account. A switch also clears the trip, so it doesn't count.
+	let dockedTrip: string | null = null;
+	let followingTrip = false;
+	const stopTripTracking = currentTrip.subscribe(trip => {
+		const email = activeEmail();
+		const running = trip !== null && trip.confirmed && Boolean(trip.code) && trip.code !== DEBUG_TRIP_CODE;
+		if (running && email && trip.code !== dockedTrip) setTripAccount(email);
+		else if (!trip && followingTrip && !activating && email && tripAccount && sameEmail(tripAccount, email)) setTripAccount(null);
+		followingTrip = running;
+	});
+	setTripDockedListener(tripCode => {
+		dockedTrip = tripCode;
+		const email = activeEmail();
+		if (email && tripAccount && sameEmail(tripAccount, email)) setTripAccount(null);
+	});
 
 	// Keep the active account's entry current: added on its first successful login, then its rotating
 	// refresh token and its name tracked as they change. The stores change one at a time during a login or
@@ -132,7 +194,7 @@ async function start() {
 			...profile?.name && sameEmail(profile.email, credentials.email) ? { name: profile.name } : {},
 		});
 	};
-	const unsubscribers = [stopSaving, userCredentials.subscribe(trackActive), token.subscribe(trackActive), user.subscribe(trackActive)];
+	const unsubscribers = [stopSaving, stopSavingMain, stopTripTracking, userCredentials.subscribe(trackActive), token.subscribe(trackActive), user.subscribe(trackActive)];
 
 	setActiveTripRefusalHandler(retry => {
 		if (!otherAccounts().length) return false;
@@ -149,12 +211,13 @@ async function start() {
 		unsubscribers.forEach(unsubscribe => unsubscribe());
 		setActiveTripRefusalHandler(null);
 		setGhostTripHandler(null);
+		setTripDockedListener(null);
 		started = null;
 	};
 }
 
 /** A session for the account: its saved refresh token while that's still valid, otherwise a full login. */
-async function signIn(account: SavedAccount): Promise<VaimooSession> {
+export async function signIn(account: SavedAccount): Promise<VaimooSession> {
 	if (account.refreshToken) {
 		try {
 			return await refreshVaimooSession(account.refreshToken);
@@ -165,8 +228,42 @@ async function signIn(account: SavedAccount): Promise<VaimooSession> {
 	return loginWithEmel(account.email, account.password);
 }
 
+/** Keep the rotated refresh token of a session opened for an account that isn't the active one. */
+export function rememberSession(email: string, session: VaimooSession) {
+	const active = activeEmail();
+	if (active && sameEmail(active, email)) return;
+	upsert({ email, userId: session.userId, refreshToken: session.refreshToken });
+}
+
+const inFlight = () => [tokenRefreshInFlight(), tripStatusInFlight()].filter(request => request != null);
+
+/**
+ * Wait for a token refresh or trip check of the current account that is already under way: finishing after the
+ * switch, it would put the previous account's session or trip back. Gives up after SETTLE_TIMEOUT_MS.
+ */
+async function settleActiveSession() {
+	const deadline = Date.now() + SETTLE_TIMEOUT_MS;
+	for (let pending = inFlight(); pending.length && Date.now() < deadline; pending = inFlight()) {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		await Promise.race([Promise.allSettled(pending), new Promise(resolve => timer = setTimeout(resolve, deadline - Date.now()))]);
+		clearTimeout(timer);
+	}
+}
+
+/** Set while activate() swaps the stores, so clearing the previous account's trip doesn't count as the trip ending. */
+let activating = false;
+
 /** Make the account active, the way logging out and back in would but without the login screen in between. */
 function activate(account: SavedAccount, session: VaimooSession) {
+	activating = true;
+	try {
+		swapIn(account, session);
+	} finally {
+		activating = false;
+	}
+}
+
+function swapIn(account: SavedAccount, session: VaimooSession) {
 	stopBackendSync();
 	currentTrip.set(null);
 	tripRating.set({ currentRating: null });
@@ -206,6 +303,7 @@ export async function switchAccount(email: string): Promise<SwitchResult> {
 			return 'failed';
 		}
 		upsert({ email: target.email, userId: session.userId, refreshToken: session.refreshToken });
+		await settleActiveSession();
 		activate(target, session);
 		return 'ok';
 	} finally {
@@ -225,7 +323,10 @@ export async function addAccount(email: string, password: string): Promise<numbe
 	}
 	upsert({ email, password, userId: session.userId, refreshToken: session.refreshToken });
 	const account = get(savedAccounts).find(saved => sameEmail(saved.email, email));
-	if (account) activate(account, session);
+	if (account) {
+		await settleActiveSession();
+		activate(account, session);
+	}
 	return 0;
 }
 
@@ -245,6 +346,9 @@ export async function removeAccount(email: string): Promise<SwitchResult> {
 		}
 	}
 	savedAccounts.update(accounts => accounts.filter(account => !sameEmail(account.email, email)));
+	const main = get(mainAccount);
+	if (main && sameEmail(main, email)) mainAccount.set(null);
+	if (tripAccount && sameEmail(tripAccount, email)) setTripAccount(null);
 	return 'ok';
 }
 

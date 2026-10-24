@@ -1,8 +1,12 @@
 <script lang="ts">
 	// Gira+ Multi: the saved accounts in the profile page, to switch between, add and remove
 	import { userCredentials } from '$lib/account';
-	import { addAccount, otherAccounts, removeAccount, sameEmail, savedAccounts, switchAccount, switchingTo, tripInProgress, type SwitchResult } from '$lib/accounts';
+	import { refreshAccountLabels } from '$lib/account-labels';
+	import { addAccount, mainAccount, otherAccounts, removeAccount, sameEmail, savedAccounts, switchAccount, switchingTo, tripInProgress, type SwitchResult } from '$lib/accounts';
+	import AccountLabels from '$lib/components/AccountLabels.svelte';
 	import Login from '$lib/components/Login.svelte';
+	import MainCaption from '$lib/components/MainCaption.svelte';
+	import { hold } from '$lib/hold';
 	import { t } from '$lib/translations';
 	import { enqueueDialog, errorMessages } from '$lib/ui.svelte';
 	import { IconLoader2 } from '@tabler/icons-svelte';
@@ -10,9 +14,12 @@
 	import IconTrash from '@tabler/icons-svelte/icons/trash';
 	import IconUserCircle from '@tabler/icons-svelte/icons/user-circle';
 	import IconUserPlus from '@tabler/icons-svelte/icons/user-plus';
+	import { onMount } from 'svelte';
 	import { fade } from 'svelte/transition';
 
 	let { onclose }: { onclose: () => void } = $props();
+
+	onMount(() => void refreshAccountLabels());
 
 	let adding = $state(false);
 	let pendingEmail = $state('');
@@ -87,8 +94,10 @@
 	<div class="text-xs font-bold text-label uppercase tracking-wide px-1">{$t('multi_accounts_title')}</div>
 	{#each $savedAccounts as account (account.email)}
 		{@const active = isActive(account.email)}
+		{@const main = $mainAccount !== null && sameEmail($mainAccount, account.email)}
 		<div class="flex items-center rounded-2xl bg-background dark:bg-background-secondary" style:box-shadow="0px 0px 12px 0px var(--color-shadow)">
-			<button class="flex items-center gap-3 grow min-w-0 text-left px-3 py-2 rounded-2xl active:bg-background-secondary dark:active:bg-background-tertiary transition-colors" disabled={active || $switchingTo !== null} onclick={() => requestSwitch(account.email)}>
+			<!-- Not disabled when active: holding the active account must still pick it as the main one -->
+			<button class="flex items-center gap-3 grow min-w-0 text-left px-3 py-2 rounded-2xl select-none active:bg-background-secondary dark:active:bg-background-tertiary transition-colors" style:-webkit-touch-callout="none" disabled={$switchingTo !== null} onclick={() => requestSwitch(account.email)} use:hold={() => mainAccount.set(main ? null : account.email)}>
 				{#if $switchingTo === account.email}
 					<IconLoader2 class="animate-spin text-primary shrink-0" size={28} />
 				{:else if active}
@@ -97,8 +106,12 @@
 					<IconUserCircle class="text-label shrink-0" size={28} stroke={1.75} />
 				{/if}
 				<div class="min-w-0">
+					{#if main}
+						<MainCaption />
+					{/if}
 					<div class="font-bold text-info truncate">{account.name}</div>
 					<div class="text-xs font-semibold text-label truncate">{active ? `${$t('multi_active_label')} · ` : ''}{account.email}</div>
+					<AccountLabels email={account.email} {active} />
 				</div>
 			</button>
 			<button class="p-3 text-label active:text-warning transition-colors" aria-label={$t('multi_remove_button')} disabled={$switchingTo !== null} onclick={() => requestRemove(account.email)}>
@@ -106,6 +119,7 @@
 			</button>
 		</div>
 	{/each}
+	<div class="text-xs text-label px-1">{$t('multi_main_hint')}</div>
 	<button class="flex items-center gap-2 justify-center font-bold text-primary py-2" disabled={$switchingTo !== null} onclick={() => adding = true}>
 		<IconUserPlus size={22} stroke={2} />
 		{$t('multi_add_account')}

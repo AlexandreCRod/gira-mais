@@ -14,12 +14,15 @@ const mocks = vi.hoisted(() => ({
 	refreshVaimooSession: vi.fn(),
 	stopBackendSync: vi.fn(),
 	logOut: vi.fn(),
+	refreshInFlight: null as Promise<unknown> | null,
+	statusInFlight: null as Promise<unknown> | null,
 }));
 
 vi.mock('@capacitor/preferences', () => ({
 	Preferences: {
 		get: vi.fn(async ({ key }: { key: string }) => ({ value: mocks.preferences.get(key) ?? null })),
 		set: vi.fn(async ({ key, value }: { key: string, value: string }) => { mocks.preferences.set(key, value); }),
+		remove: vi.fn(async ({ key }: { key: string }) => { mocks.preferences.delete(key); }),
 	},
 }));
 vi.mock('$lib/account', async () => {
@@ -38,11 +41,12 @@ vi.mock('$lib/account', async () => {
 		logOut: mocks.logOut,
 		refreshAccountInfo: vi.fn(async () => ({})),
 		updateUserInfo: vi.fn(async () => {}),
+		tokenRefreshInFlight: () => mocks.refreshInFlight,
 	};
 });
 vi.mock('$lib/trip', async () => {
 	const { writable } = await import('svelte/store');
-	return { currentTrip: writable(null), tripRating: writable({ currentRating: null }), DEBUG_TRIP_CODE: 'DEBUG-TRIP' };
+	return { currentTrip: writable(null), tripRating: writable({ currentRating: null }), DEBUG_TRIP_CODE: 'DEBUG-TRIP', tripStatusInFlight: () => mocks.statusInFlight };
 });
 vi.mock('$lib/gira-api/backend-sync', () => ({ stopBackendSync: mocks.stopBackendSync }));
 vi.mock('$lib/error-reporting', () => ({ reportApiError: vi.fn() }));
@@ -286,5 +290,150 @@ describe('ghost trip', () => {
 		ghost.ghostTripSignal('123', 0);
 		ghost.ghostTripStillOpen('123', ghost.GHOST_TRIP_AFTER_MS);
 		expect(get(accounts.accountPicker)).toBeNull();
+	});
+});
+
+/** A request that's under way until finish() is called, like upstream's shared refresh and trip-check promises. */
+function underWay(slot: 'refreshInFlight' | 'statusInFlight', onFinish: () => void) {
+	let finish!: () => void;
+	mocks[slot] = new Promise<void>(resolve => finish = resolve).then(onFinish).finally(() => mocks[slot] = null);
+	return () => finish();
+}
+
+describe('a switch while the previous account is busy', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mocks.refreshInFlight = null;
+		mocks.statusInFlight = null;
+	});
+
+	it('lets a token refresh already under way finish before switching', async () => {
+		const { account, accounts } = await setup([ALICE, BOB], ALICE);
+		mocks.refreshVaimooSession.mockResolvedValue(session(2, BOB.email));
+		const finish = underWay('refreshInFlight', () => account.token.set(tokenFor(1, 'alice-late')));
+
+		const switching = accounts.switchAccount(BOB.email);
+		await Promise.resolve();
+		finish();
+		expect(await switching).toBe('ok');
+
+		expect(get(account.token)).toMatchObject({ userId: 2 });
+		expect(get(accounts.savedAccounts)[0].refreshToken).toBe('alice-late');
+	});
+
+	it('lets a trip check already under way finish before switching', async () => {
+		const { trip, accounts } = await setup([ALICE, BOB], ALICE);
+		mocks.refreshVaimooSession.mockResolvedValue(session(2, BOB.email));
+		const finish = underWay('statusInFlight', () => trip.currentTrip.set({ code: 'alice-trip', confirmed: true } as never));
+
+		const switching = accounts.switchAccount(BOB.email);
+		await Promise.resolve();
+		finish();
+		expect(await switching).toBe('ok');
+
+		expect(get(trip.currentTrip)).toBeNull();
+	});
+
+	it('stops waiting after ten seconds', async () => {
+		const { account, accounts } = await setup([ALICE, BOB], ALICE);
+		mocks.refreshVaimooSession.mockResolvedValue(session(2, BOB.email));
+		vi.useFakeTimers();
+		try {
+			mocks.refreshInFlight = new Promise(() => {});
+			const switching = accounts.switchAccount(BOB.email);
+			await vi.advanceTimersByTimeAsync(10_000);
+			expect(await switching).toBe('ok');
+			expect(get(account.token)).toMatchObject({ userId: 2 });
+		} finally {
+			vi.useRealTimers();
+			mocks.refreshInFlight = null;
+		}
+	});
+});
+
+describe('main account', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	function storedLogin(main: string | null, last: string | null, tripAccount: string | null = null) {
+		mocks.preferences.clear();
+		mocks.preferences.set('multi/accounts', JSON.stringify([ALICE, BOB]));
+		if (main) mocks.preferences.set('multi/mainAccount', main);
+		if (tripAccount) mocks.preferences.set('multi/tripAccount', tripAccount);
+		if (last) {
+			const lastAccount = [ALICE, BOB].find(saved => saved.email === last)!;
+			mocks.preferences.set('email', lastAccount.email);
+			mocks.preferences.set('password', lastAccount.password);
+		}
+	}
+
+	it('points upstream\'s saved login at the main account before it logs in', async () => {
+		storedLogin(BOB.email, ALICE.email);
+		await accounts.chooseStartupAccount();
+		expect(mocks.preferences.get('email')).toBe(BOB.email);
+		expect(mocks.preferences.get('password')).toBe(BOB.password);
+	});
+
+	it('opens on the account whose trip was still running, for that start only', async () => {
+		storedLogin(BOB.email, BOB.email, ALICE.email);
+		await accounts.chooseStartupAccount();
+		expect(mocks.preferences.get('email')).toBe(ALICE.email);
+		expect(mocks.preferences.has('multi/tripAccount')).toBe(false);
+	});
+
+	it('leaves a logged-out app and a missing main account alone', async () => {
+		storedLogin(BOB.email, null);
+		await accounts.chooseStartupAccount();
+		expect(mocks.preferences.has('email')).toBe(false);
+		storedLogin(null, ALICE.email);
+		await accounts.chooseStartupAccount();
+		expect(mocks.preferences.get('email')).toBe(ALICE.email);
+	});
+
+	it('is saved, and forgotten with its account', async () => {
+		const { accounts } = await setup([ALICE, BOB], ALICE);
+		accounts.mainAccount.set(BOB.email);
+		await Promise.resolve();
+		expect(mocks.preferences.get('multi/mainAccount')).toBe(BOB.email);
+		expect(await accounts.removeAccount(BOB.email)).toBe('ok');
+		expect(get(accounts.mainAccount)).toBeNull();
+		expect(mocks.preferences.has('multi/mainAccount')).toBe(false);
+	});
+});
+
+describe('the account with a running trip', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mocks.refreshInFlight = null;
+		mocks.statusInFlight = null;
+	});
+	afterEach(() => ghost.ghostTripReset());
+
+	const running = { code: '42', confirmed: true, finished: false } as never;
+
+	it('is remembered while the trip runs and forgotten when it ends', async () => {
+		const { trip } = await setup([ALICE, BOB], ALICE);
+		trip.currentTrip.set(running);
+		expect(mocks.preferences.get('multi/tripAccount')).toBe(ALICE.email);
+		trip.currentTrip.set(null);
+		expect(mocks.preferences.has('multi/tripAccount')).toBe(false);
+	});
+
+	it('is kept when switching away, since the trip goes on', async () => {
+		const { trip, accounts } = await setup([ALICE, BOB], ALICE);
+		mocks.refreshVaimooSession.mockResolvedValue(session(2, BOB.email));
+		trip.currentTrip.set(running);
+		expect(await accounts.switchAccount(BOB.email)).toBe('ok');
+		expect(mocks.preferences.get('multi/tripAccount')).toBe(ALICE.email);
+	});
+
+	it('is forgotten once the bike is docked, ghost trip or not', async () => {
+		const { trip } = await setup([ALICE, BOB], ALICE);
+		trip.currentTrip.set(running);
+		ghost.ghostTripSignal('42', 0);
+		expect(mocks.preferences.has('multi/tripAccount')).toBe(false);
+		trip.currentTrip.set({ code: '42', confirmed: true, finished: false } as never);
+		expect(mocks.preferences.has('multi/tripAccount')).toBe(false);
 	});
 });

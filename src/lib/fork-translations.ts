@@ -41,6 +41,26 @@ export const forkTranslations = {
 		en: 'The bike reports it\'s docked, but EMEL still shows this trip open. Unlock your next bike with another account:',
 		pt: 'A bicicleta indica que está na doca, mas a EMEL ainda mostra esta viagem aberta. Desbloquear a próxima bicicleta com outra conta:',
 	},
+	multi_main_label: {
+		en: 'Main',
+		pt: 'Principal',
+	},
+	multi_main_hint: {
+		en: 'Press and hold an account to open the app on it.',
+		pt: 'Mantenha premida uma conta para a aplicação abrir com ela.',
+	},
+	multi_trip_running_label: {
+		en: 'Trip running',
+		pt: 'Viagem a decorrer',
+	},
+	multi_pass_expired_label: {
+		en: 'Pass expired',
+		pt: 'Passe expirado',
+	},
+	multi_no_pass_label: {
+		en: 'No pass',
+		pt: 'Sem passe',
+	},
 	multi_not_now: {
 		en: 'Not now',
 		pt: 'Agora não',

@@ -9,16 +9,23 @@ export const GHOST_TRIP_AFTER_MS = 2 * 60_000;
 /** Shows the offer; false when there is nothing to offer, so a later poll tries again. */
 type Handler = () => boolean;
 let handler: Handler | null = null;
+/** Told when a trip's bike is first reported docked, ghost trip or not. */
+let dockedListener: ((tripCode: string) => void) | null = null;
 let watch: { tripCode: string, signalledAt: number, offered: boolean } | null = null;
 
 export function setGhostTripHandler(next: Handler | null) {
 	handler = next;
 }
 
+export function setTripDockedListener(next: ((tripCode: string) => void) | null) {
+	dockedListener = next;
+}
+
 /** The trip's bike reported being docked with no trip. Only the first report of a trip counts. */
 export function ghostTripSignal(tripCode: string, now = Date.now()) {
 	if (watch?.tripCode === tripCode) return;
 	watch = { tripCode, signalledAt: now, offered: false };
+	dockedListener?.(tripCode);
 }
 
 /** A regular poll found VAIMOO still holding the trip; make the offer once it has outlived the docked signal. */

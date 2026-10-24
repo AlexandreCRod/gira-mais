@@ -343,3 +343,6 @@ export function toggleDebugTrip() {
 	console.warn('Cannot toggle a debug trip while a real trip is active.');
 	return false;
 }
+
+// Gira+ Multi: lets an account switch wait for a trip check that is already under way
+export const tripStatusInFlight = () => statusRequest;
