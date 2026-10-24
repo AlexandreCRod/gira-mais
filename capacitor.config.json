@@ -1,6 +1,6 @@
 {
-	"appId": "dev.tteles.gira",
-	"appName": "Gira+",
+	"appId": "io.github.alexandrecrod.giramais",
+	"appName": "Gira+ Multi",
 	"webDir": "build",
 	"plugins": {
 		"SplashScreen": {

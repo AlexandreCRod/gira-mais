@@ -29,7 +29,8 @@ export async function loadSettings() {
 	const distanceLock = raw.distanceLock !== 'false'; // !== 'false' is so that it defaults to true if the key is not set
 	const mockUnlock = raw.mockUnlock !== 'false';
 	const backgroundLocation = raw.backgroundLocation !== 'false';
-	const analytics = raw.analytics !== 'false';
+	// Gira+ Multi starts with analytics off, so its reports don't mix with upstream's until they're labelled
+	const analytics = raw.analytics === 'true';
 	const reportRatings = raw.reportRatings !== 'false';
 	const shareArrivals = raw.shareArrivals !== 'false';
 	const theme = (raw.theme || 'system') as 'light'|'dark'|'system'|'daylight';

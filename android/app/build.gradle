@@ -4,7 +4,7 @@ android {
     namespace "dev.tteles.gira"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "dev.tteles.gira"
+        applicationId "io.github.alexandrecrod.giramais"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 32

@@ -9,32 +9,11 @@
 	import { httpRequestWithRetry } from '$lib/utils';
 	import { version } from '$app/environment';
 	import X from '@tabler/icons-svelte/icons/x';
+	import { compareVersions, LATEST_RELEASE_API_URL, RELEASES_URL } from '$lib/fork';
 
 	let message = $state('');
 	let messageTimestamp = $state('');
 	let latestVersion = $state('');
-
-	/** Compare two semantic versions (with or without a 'v' prefix or a `-dev (hash)` suffix): 1 if version1 > version2, -1 if lower, 0 if equal */
-	function compareSemanticVersions(version1: string, version2: string) {
-		// Keep only the numeric x.y.z part
-		const cleanV1 = version1.match(/\d+(\.\d+)*/)?.[0] ?? '';
-		const cleanV2 = version2.match(/\d+(\.\d+)*/)?.[0] ?? '';
-
-		const v1Parts = cleanV1.split('.').map(Number);
-		const v2Parts = cleanV2.split('.').map(Number);
-
-		// Pad with zeros if one version has fewer parts
-		const maxLength = Math.max(v1Parts.length, v2Parts.length);
-		while (v1Parts.length < maxLength) v1Parts.push(0);
-		while (v2Parts.length < maxLength) v2Parts.push(0);
-
-		for (let i = 0; i < maxLength; i++) {
-			if (v1Parts[i] > v2Parts[i]) return 1;
-			if (v1Parts[i] < v2Parts[i]) return -1;
-		}
-
-		return 0;
-	}
 
 	onMount(() => {
 		getMessage().then(async res => {
@@ -51,7 +30,7 @@
 			if (get(appSettings)?.updateWarning) {
 				httpRequestWithRetry({
 					method: 'GET',
-					url: 'https://api.github.com/repos/rt-evil-inc/gira-mais/releases/latest',
+					url: LATEST_RELEASE_API_URL,
 					headers: {
 						'Accept': 'application/vnd.github.v3+json',
 					},
@@ -61,7 +40,7 @@
 					const latestVersionTag = response.data.tag_name;
 
 					// Only show dialog if latest version is semantically greater than current version and not ignored
-					if (latestVersionTag !== ignoredVersion && compareSemanticVersions(latestVersionTag, version) > 0) {
+					if (latestVersionTag !== ignoredVersion && compareVersions(latestVersionTag, version) > 0) {
 						latestVersion = latestVersionTag;
 					}
 				});
@@ -87,7 +66,7 @@
 				<div class="text-info font-medium max-h-[70vh] overflow-y-auto">
 					<h1 class="text-lg font-semibold">{$t('new_version_available')}</h1>
 					<p>v{version} -> <b>{latestVersion}</b></p>
-					<a href="https://github.com/rt-evil-inc/gira-mais/releases" class="text-primary underline">{$t('see_release_notes')}</a>
+					<a href={RELEASES_URL} class="text-primary underline">{$t('see_release_notes')}</a>
 					<p class="text-xs text-label mt-2">{$t('update_warning_setting_note')}</p>
 				</div>
 				<div class="flex justify-end mt-4 gap-2">

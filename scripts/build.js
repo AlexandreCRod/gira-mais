@@ -49,10 +49,11 @@ async function updateAppId(dev = false) {
 	for (const file of files) {
 		let content = await fs.readFile(file, 'utf8');
 		if (dev) {
-			content = content.replaceAll(/(?<!namespace ")dev\.tteles\.gira(?!\.dev)/g, 'dev.tteles.gira.dev');
+			// Gira+ Multi ships under its own app id (io.github.alexandrecrod.giramais); iOS still uses the upstream one
+			content = content.replaceAll(/(?<!namespace ")(dev\.tteles\.gira|io\.github\.alexandrecrod\.giramais)(?!\.dev)/g, '$1.dev');
 			content = content.replaceAll(/Gira\+(?! Dev)/g, 'Gira+ Dev');
 		} else {
-			content = content.replaceAll(/(?<!namespace ")dev\.tteles\.gira\.dev/g, 'dev.tteles.gira');
+			content = content.replaceAll(/(?<!namespace ")(dev\.tteles\.gira|io\.github\.alexandrecrod\.giramais)\.dev/g, '$1');
 			content = content.replaceAll('Gira+ Dev', 'Gira+');
 		}
 		await fs.writeFile(file, content, 'utf8');
