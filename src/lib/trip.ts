@@ -14,6 +14,7 @@ import { Preferences } from '@capacitor/preferences';
 import { refreshAccountInfo, refreshToken, token } from './account';
 import type { StationInfo } from './map.svelte';
 import { t, type Translations } from './translations';
+import { isActiveTripRefusal, offerOtherAccounts } from './unlock-fallback';
 
 export type ActiveTrip = {
 	code: string;
@@ -276,7 +277,12 @@ export async function tryStartTrip(id: string, communicationId: string, station:
 			}
 		}
 		currentTrip.set(null);
-		addKnownApiError(error, context);
+		// Gira+ Multi: when this account is stuck in a (ghost) trip, offer to unlock with another saved account
+		if (isActiveTripRefusal(error) && offerOtherAccounts(() => tryStartTrip(id, communicationId, station, subject))) {
+			void reportApiError('gira_api_error', error, context);
+		} else {
+			addKnownApiError(error, context);
+		}
 		if (reported) reportUnlockAttempt(reported, context, error instanceof VaimooNetworkError ? 'network-error' : 'refused', error);
 		return false;
 	}

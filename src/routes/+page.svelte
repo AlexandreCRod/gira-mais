@@ -30,6 +30,8 @@
 	import { networkStatus } from '$lib/network';
 	import Dialog from '$lib/components/Dialog.svelte';
 	import { startArrivalSharing } from '$lib/arrival-sharing';
+	import AccountPickerHost from '$lib/components/AccountPickerHost.svelte';
+	import TripAccountButton from '$lib/components/TripAccountButton.svelte';
 
 	let backListener: PluginListenerHandle;
 	let innerHeight = $state(0);
@@ -103,6 +105,9 @@
 
 	{#if $currentTrip !== null}
 		<TripStatus bind:height={tripStatusHeight} bind:width={tripStatusWidth} />
+		<Floating left={tripStatusWidth + 20} y={innerHeight} bottom offset={20}>
+			<TripAccountButton />
+		</Floating>
 	{:else}
 		<StationMenu bind:posTop={stationMenuPos} bind:anchorTop={stationMenuAnchor} bind:height={menuHeight} />
 		{#if $tripRating.currentRating != null && $networkStatus }
@@ -145,6 +150,7 @@
 		<Profile onclose={() => profileOpen = false}/>
 	{/if}
 	<Dialog />
+	<AccountPickerHost />
 </div>
 
 <InfoDialog />

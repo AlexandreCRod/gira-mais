@@ -4,6 +4,9 @@
 	import { keyboard } from '$lib/ui.svelte';
 	import { IconLoader2 } from '@tabler/icons-svelte';
 
+	// Gira+ Multi: the add-account screen reuses this form with its own login and a way back
+	let { title, onlogin, oncancel }: { title?: string, onlogin?: (email: string, password: string) => Promise<number>, oncancel?: () => void } = $props();
+
 	let email = $state('');
 	let password = $state('');
 	let errorCode:number|null = $state(null);
@@ -19,8 +22,12 @@
 		loading = true;
 		errorCode = null;
 		try {
-			errorCode = await login(email, password);
-			if (errorCode === 0) userCredentials.set({ email, password });
+			if (onlogin) {
+				errorCode = await onlogin(email, password);
+			} else {
+				errorCode = await login(email, password);
+				if (errorCode === 0) userCredentials.set({ email, password });
+			}
 		} catch (error) {
 			// Network or server trouble rather than bad credentials
 			console.error('Login failed', error);
@@ -33,15 +40,15 @@
 
 <div class="flex flex-col max-w-sm px-4 w-full h-full justify-center transition-all duration-300" style:padding-bottom="{keyboard.height}px">
 	<div class="bg-background rounded-2xl max-w-sm w-full flex flex-col items-center p-6" style:box-shadow="0px 0px 20px 0px var(--color-shadow)">
-		<div class="text-center text-lg text-info font-semibold mb-2 rounded-lg">{$t('welcome_message')}</div>
+		<div class="text-center text-lg text-info font-semibold mb-2 rounded-lg">{title ?? $t('welcome_message')}</div>
 		<form class="flex flex-col w-full gap-4" onsubmit={loginWrapper}>
 			<div class="w-full">
 				<div class="text-sm text-info font-medium pb-1">{$t('email_label')}</div>
-				<input type="email" required oninput={clearError} bind:value={email} placeholder={$t('email_placeholder')} class="placeholder-label text-info w-full px-2 h-12 rounded-lg border border-background-tertiary bg-background-secondary focus:ring-primary focus:border-primary">
+				<input type="email" name="email" autocomplete="username" required oninput={clearError} bind:value={email} placeholder={$t('email_placeholder')} class="placeholder-label text-info w-full px-2 h-12 rounded-lg border border-background-tertiary bg-background-secondary focus:ring-primary focus:border-primary">
 			</div>
 			<div class="w-full">
 				<div class="text-sm text-info font-medium pb-1">{$t('password_label')}</div>
-				<input type="password" required oninput={clearError} bind:value={password} placeholder="••••••••" class="placeholder-label text-info w-full px-2 h-12 rounded-lg border border-background-tertiary bg-background-secondary focus:ring-primary focus:border-primary">
+				<input type="password" name="password" autocomplete="current-password" required oninput={clearError} bind:value={password} placeholder="••••••••" class="placeholder-label text-info w-full px-2 h-12 rounded-lg border border-background-tertiary bg-background-secondary focus:ring-primary focus:border-primary">
 				{#if errorCode !== null && errorCode !== 0}
 					<div class="text-sm text-red-500 pt-1">{errorCodes[errorCode] || $t('unknown_error')}</div>
 				{/if}
@@ -53,6 +60,9 @@
 					{$t('login_button')}
 				{/if}
 			</button>
+			{#if oncancel}
+				<button type="button" class="w-full h-10 font-bold text-label" onclick={oncancel}>{$t('cancel_button')}</button>
+			{/if}
 		</form>
 	</div>
 </div>

@@ -1,4 +1,5 @@
 import { appSettings } from './settings';
+import { forkTranslations } from './fork-translations';
 import { derived, get } from 'svelte/store';
 
 type Locale = 'en' | 'pt';
@@ -29,6 +30,7 @@ export const t = derived(appSettings, () => {
 });
 
 const translations = {
+	...forkTranslations,
 	background_tracking_title: {
 		en: 'Trip in progress',
 		pt: 'Viagem em curso',

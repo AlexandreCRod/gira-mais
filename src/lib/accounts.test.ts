@@ -1,0 +1,271 @@
+import { get } from 'svelte/store';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { VaimooSession } from '$lib/vaimoo-api/types';
+import * as account from '$lib/account';
+import * as trip from '$lib/trip';
+import * as fallback from '$lib/unlock-fallback';
+import * as accounts from './accounts';
+import { InvalidCredentialsError } from '$lib/vaimoo-api/client';
+
+const mocks = vi.hoisted(() => ({
+	preferences: new Map<string, string>,
+	loginWithEmel: vi.fn(),
+	refreshVaimooSession: vi.fn(),
+	stopBackendSync: vi.fn(),
+	logOut: vi.fn(),
+}));
+
+vi.mock('@capacitor/preferences', () => ({
+	Preferences: {
+		get: vi.fn(async ({ key }: { key: string }) => ({ value: mocks.preferences.get(key) ?? null })),
+		set: vi.fn(async ({ key, value }: { key: string, value: string }) => { mocks.preferences.set(key, value); }),
+	},
+}));
+vi.mock('$lib/account', async () => {
+	const { writable } = await import('svelte/store');
+	const token = writable<unknown>(null);
+	const userCredentials = writable<{ email: string, password: string } | null>(null);
+	mocks.logOut.mockImplementation(async () => {
+		token.set(null);
+		userCredentials.set(null);
+	});
+	return {
+		token,
+		userCredentials,
+		user: writable(null),
+		accountInfo: writable(null),
+		logOut: mocks.logOut,
+		refreshAccountInfo: vi.fn(async () => ({})),
+		updateUserInfo: vi.fn(async () => {}),
+	};
+});
+vi.mock('$lib/trip', async () => {
+	const { writable } = await import('svelte/store');
+	return { currentTrip: writable(null), tripRating: writable({ currentRating: null }), DEBUG_TRIP_CODE: 'DEBUG-TRIP' };
+});
+vi.mock('$lib/gira-api/backend-sync', () => ({ stopBackendSync: mocks.stopBackendSync }));
+vi.mock('$lib/error-reporting', () => ({ reportApiError: vi.fn() }));
+vi.mock('$lib/vaimoo-api/client', () => {
+	class VaimooApiError extends Error {
+		code = null;
+
+		errors = [];
+	}
+	class InvalidCredentialsError extends VaimooApiError {}
+	return { VaimooApiError, InvalidCredentialsError, loginWithEmel: mocks.loginWithEmel, refreshVaimooSession: mocks.refreshVaimooSession };
+});
+
+const ALICE = { email: 'alice@example.com', password: 'alice-pass', name: 'Alice', userId: 1, refreshToken: 'alice-refresh' };
+const BOB = { email: 'bob@example.com', password: 'bob-pass', name: 'Bob', userId: 2, refreshToken: 'bob-refresh' };
+
+function session(userId: number, email: string, refreshToken = `refresh-${userId}-new`) {
+	return {
+		accessToken: `access-${userId}`,
+		refreshToken,
+		userId,
+		expiresAt: Date.now() + 300_000,
+		user: { userId, tenantId: 'tenant', email, firstName: 'User', lastName: String(userId) },
+	} as unknown as VaimooSession;
+}
+
+function tokenFor(userId: number, refreshToken: string) {
+	return { accessToken: `access-${userId}`, refreshToken, expiration: Date.now() + 300_000, userId, tenantId: 'tenant' };
+}
+
+let stopTracking: (() => void) | null = null;
+
+/** A clean slate for each test: the stores are shared module state, so reset them before tracking starts. */
+async function setup(saved: unknown[] = [], active: typeof ALICE | null = null) {
+	mocks.preferences.clear();
+	if (saved.length) mocks.preferences.set('multi/accounts', JSON.stringify(saved));
+	account.token.set(null);
+	account.userCredentials.set(null);
+	account.user.set(null);
+	trip.currentTrip.set(null);
+	accounts.accountPicker.set(null);
+	if (active) {
+		account.userCredentials.set({ email: active.email, password: active.password });
+		account.token.set(tokenFor(active.userId, active.refreshToken));
+	}
+	stopTracking = await accounts.initAccounts();
+	return { account, trip, fallback, accounts };
+}
+
+afterEach(() => {
+	stopTracking?.();
+	stopTracking = null;
+});
+
+const stored = () => JSON.parse(mocks.preferences.get('multi/accounts') ?? '[]');
+
+describe('saved accounts', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('saves the account that was already logged in, as upstream Gira+ kept it', async () => {
+		const { accounts } = await setup([], ALICE);
+		expect(get(accounts.savedAccounts)).toEqual([{ email: ALICE.email, password: ALICE.password, name: ALICE.email, userId: 1, refreshToken: 'alice-refresh' }]);
+		expect(stored()).toHaveLength(1);
+	});
+
+	it('saves an account on its first login', async () => {
+		const { account, accounts } = await setup();
+		account.token.set(tokenFor(1, 'alice-refresh'));
+		account.userCredentials.set({ email: ALICE.email, password: ALICE.password });
+		account.user.set({ email: ALICE.email, name: 'Alice A' });
+		expect(get(accounts.savedAccounts)).toEqual([{ email: ALICE.email, password: ALICE.password, name: 'Alice A', userId: 1, refreshToken: 'alice-refresh' }]);
+	});
+
+	it('tracks the active account\'s rotating refresh token and leaves the others alone', async () => {
+		const { account, accounts } = await setup([ALICE, BOB], ALICE);
+		account.token.set(tokenFor(1, 'alice-rotated'));
+		expect(get(accounts.savedAccounts)).toEqual([{ ...ALICE, refreshToken: 'alice-rotated' }, BOB]);
+		expect(stored()[0].refreshToken).toBe('alice-rotated');
+	});
+
+	it('ignores a late token for another account', async () => {
+		const { account, accounts } = await setup([ALICE, BOB], ALICE);
+		account.token.set(tokenFor(2, 'stray'));
+		expect(get(accounts.savedAccounts)[0].refreshToken).toBe('alice-refresh');
+	});
+
+	it('skips saved entries it can\'t read', async () => {
+		const { accounts } = await setup([ALICE, { email: 'no-password@example.com' }, 'junk']);
+		expect(get(accounts.savedAccounts)).toEqual([ALICE]);
+	});
+});
+
+describe('switchAccount', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('switches with the saved session while it is still valid', async () => {
+		const { account, trip, accounts } = await setup([ALICE, BOB], ALICE);
+		trip.currentTrip.set({ code: 'ghost' } as never);
+		mocks.refreshVaimooSession.mockResolvedValue(session(2, BOB.email));
+
+		expect(await accounts.switchAccount(BOB.email)).toBe('ok');
+
+		expect(mocks.refreshVaimooSession).toHaveBeenCalledWith('bob-refresh');
+		expect(mocks.loginWithEmel).not.toHaveBeenCalled();
+		expect(mocks.stopBackendSync).toHaveBeenCalled();
+		expect(get(trip.currentTrip)).toBeNull();
+		expect(get(account.userCredentials)).toEqual({ email: BOB.email, password: BOB.password });
+		expect(get(account.token)).toMatchObject({ userId: 2, refreshToken: 'refresh-2-new' });
+		expect(get(account.user)).toEqual({ email: BOB.email, name: 'User 2' });
+		expect(get(accounts.savedAccounts)[1].refreshToken).toBe('refresh-2-new');
+		expect(get(accounts.savedAccounts)[0].refreshToken).toBe('alice-refresh');
+	});
+
+	it('logs in again when the saved session has expired', async () => {
+		const { account, accounts } = await setup([ALICE, BOB], ALICE);
+		mocks.refreshVaimooSession.mockRejectedValue(new Error('expired'));
+		mocks.loginWithEmel.mockResolvedValue(session(2, BOB.email));
+
+		expect(await accounts.switchAccount(BOB.email)).toBe('ok');
+		expect(mocks.loginWithEmel).toHaveBeenCalledWith(BOB.email, BOB.password);
+		expect(get(account.token)).toMatchObject({ userId: 2 });
+	});
+
+	it('keeps the active account when the other one\'s password is rejected', async () => {
+		const { account, accounts } = await setup([ALICE, { ...BOB, refreshToken: null }], ALICE);
+		mocks.loginWithEmel.mockRejectedValue(new InvalidCredentialsError('rejected', null));
+
+		expect(await accounts.switchAccount(BOB.email)).toBe('invalid-credentials');
+		expect(mocks.stopBackendSync).not.toHaveBeenCalled();
+		expect(get(account.token)).toMatchObject({ userId: 1 });
+		expect(get(account.userCredentials)?.email).toBe(ALICE.email);
+	});
+
+	it('reports network trouble as a failed switch', async () => {
+		const { account, accounts } = await setup([ALICE, { ...BOB, refreshToken: null }], ALICE);
+		mocks.loginWithEmel.mockRejectedValue(new Error('offline'));
+
+		expect(await accounts.switchAccount(BOB.email)).toBe('failed');
+		expect(get(account.token)).toMatchObject({ userId: 1 });
+		expect(get(accounts.switchingTo)).toBeNull();
+	});
+});
+
+describe('addAccount', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('adds the account and makes it active', async () => {
+		const { account, accounts } = await setup([ALICE], ALICE);
+		mocks.loginWithEmel.mockResolvedValue(session(2, BOB.email));
+
+		expect(await accounts.addAccount(BOB.email, BOB.password)).toBe(0);
+		expect(get(accounts.savedAccounts).map(saved => saved.email)).toEqual([ALICE.email, BOB.email]);
+		expect(get(account.userCredentials)?.email).toBe(BOB.email);
+		expect(get(account.token)).toMatchObject({ userId: 2 });
+	});
+
+	it('returns 100 for wrong credentials and saves nothing', async () => {
+		const { accounts } = await setup([ALICE], ALICE);
+		mocks.loginWithEmel.mockRejectedValue(new InvalidCredentialsError('rejected', null));
+
+		expect(await accounts.addAccount(BOB.email, 'wrong')).toBe(100);
+		expect(get(accounts.savedAccounts)).toHaveLength(1);
+	});
+});
+
+describe('removeAccount', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('removes an inactive account without switching', async () => {
+		const { account, accounts } = await setup([ALICE, BOB], ALICE);
+		expect(await accounts.removeAccount(BOB.email)).toBe('ok');
+		expect(get(accounts.savedAccounts)).toEqual([ALICE]);
+		expect(get(account.userCredentials)?.email).toBe(ALICE.email);
+	});
+
+	it('switches to the next account before removing the active one', async () => {
+		const { account, accounts } = await setup([ALICE, BOB], ALICE);
+		mocks.refreshVaimooSession.mockResolvedValue(session(2, BOB.email));
+
+		expect(await accounts.removeAccount(ALICE.email)).toBe('ok');
+		expect(get(accounts.savedAccounts).map(saved => saved.email)).toEqual([BOB.email]);
+		expect(get(account.userCredentials)?.email).toBe(BOB.email);
+	});
+
+	it('keeps the active account when the switch to the next one fails', async () => {
+		const { accounts } = await setup([ALICE, { ...BOB, refreshToken: null }], ALICE);
+		mocks.loginWithEmel.mockRejectedValue(new Error('offline'));
+
+		expect(await accounts.removeAccount(ALICE.email)).toBe('failed');
+		expect(get(accounts.savedAccounts)).toHaveLength(2);
+	});
+
+	it('logs out when removing the last account', async () => {
+		const { account, accounts } = await setup([ALICE], ALICE);
+		expect(await accounts.signOutActive()).toBe('ok');
+		expect(mocks.logOut).toHaveBeenCalled();
+		expect(get(account.token)).toBeNull();
+		expect(get(accounts.savedAccounts)).toEqual([]);
+	});
+});
+
+describe('unlock refused for an active trip', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it('offers the other accounts, with the unlock to retry', async () => {
+		const { accounts, fallback } = await setup([ALICE, BOB], ALICE);
+		const retry = async () => true;
+		expect(fallback.offerOtherAccounts(retry)).toBe(true);
+		expect(get(accounts.accountPicker)).toEqual({ reason: 'active-trip', retry });
+	});
+
+	it('offers nothing with a single account', async () => {
+		const { accounts, fallback } = await setup([ALICE], ALICE);
+		expect(fallback.offerOtherAccounts(async () => true)).toBe(false);
+		expect(get(accounts.accountPicker)).toBeNull();
+	});
+});
