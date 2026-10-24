@@ -89,6 +89,18 @@ export const forkTranslations = {
 		en: 'Remove',
 		pt: 'Remover',
 	},
+	multi_paid_only: {
+		en: 'Paid only',
+		pt: 'Só pagas',
+	},
+	multi_no_paid_trips: {
+		en: 'No paid trips',
+		pt: 'Sem viagens pagas',
+	},
+	multi_look_further_back: {
+		en: 'Look further back',
+		pt: 'Procurar mais atrás',
+	},
 	multi_trip_button: {
 		en: 'Not your trip? Switch account',
 		pt: 'Não é a sua viagem? Mudar de conta',

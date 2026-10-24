@@ -18,6 +18,7 @@ Download the APK from [Releases](../../releases), or add this repository's URL t
 - **Account labels.** "Trip running", and "Pass expired" or "No pass" appear under each account in the list and in the switch popups. The active account's labels come from what the app already knows. Each other account is checked when a list is shown, at most once every 3 minutes, using the same three requests Gira+ makes for the active account: session refresh, current trip, and pass.
 - **Safe switching.** A switch first waits (up to 10 seconds) for a token refresh or trip check of the previous account that's already under way. Otherwise that request could land after the switch and put the previous account back.
 - **Smooth switch.** The new account's pass and balance are loaded during the switch, with the same two requests Gira+ makes for the active account, so the profile header shows them together with the name instead of a "—" first. The header then fades in. If that load fails or takes over 3 seconds, the switch goes ahead and Gira+'s own refresh fills them in as before.
+- **Paid trips in the history.** Trips that cost money show their cost in small grey under the bike number; free trips look as before. A "Paid only" switch next to the title hides the free ones. Gira+ loads the history 15 trips at a time as you scroll, so with the switch on the app keeps loading older pages while the end of the list is in view, up to 10 pages (150 trips) at a time, then shows a "Look further back" button. These are the same requests Gira+ makes on a scroll.
 - **Login form.** Autofill hints (`username` / `current-password`). The same form is reused as the add-account screen.
 - **Own identity.** App id `io.github.alexandrecrod.giramais`, name "Gira+ Multi". The update check points at this fork, and its versions order as `1.7.1 < 1.7.1-multi.1 < 1.7.1-multi.2 < 1.7.2`.
 - **Analytics off by default**, so this build's reports don't mix with Gira+'s. Bike ratings and arrival sharing are unchanged.
@@ -35,9 +36,10 @@ Fork code lives in new files, so rebasing onto upstream releases stays cheap:
 | `src/lib/account-labels.ts` | Checks the other accounts' trip and pass for the labels, at most every 3 minutes |
 | `src/lib/account-snapshot.ts` | Gira+'s pass and balance snapshot for any account, loaded before a switch |
 | `src/lib/account-fade.ts` | Fades the profile header in when the account changes |
+| `src/lib/paid-trips.ts` | What counts as a paid trip, the cost format, and the auto-loading loop |
 | `src/lib/fork.ts` | Release URLs and version ordering for this fork |
 | `src/lib/fork-translations.ts` | The fork's own strings (pt/en) |
-| `src/lib/components/AccountPicker.svelte`, `AccountPickerHost.svelte`, `AccountSwitcher.svelte`, `AccountLabels.svelte`, `MainCaption.svelte`, `TripAccountButton.svelte`, and `src/lib/hold.ts` (press and hold) | The account UI |
+| `src/lib/components/AccountPicker.svelte`, `AccountPickerHost.svelte`, `AccountSwitcher.svelte`, `AccountLabels.svelte`, `MainCaption.svelte`, `TripAccountButton.svelte`, `TripCost.svelte`, `PaidOnlySwitch.svelte`, `PaidTripsLoader.svelte`, and `src/lib/hold.ts` (press and hold) | The account UI |
 | `scripts/multi-release.js` | Stamps the release version at build time |
 | `.github/workflows/multi-release.yml` | Rebases onto new upstream releases and publishes signed APKs |
 
@@ -52,6 +54,8 @@ Upstream files only get small hooks:
 | `src/routes/+layout.svelte` | Runs `chooseStartupAccount` just before `loadUserCreds` |
 | `src/lib/components/Login.svelte` | Autofill hints; optional title and login handler for the add-account screen |
 | `src/lib/components/Profile.svelte` | Account switcher; sign-out goes through the saved accounts; `use:fadeOnAccountChange` on the header |
+| `src/lib/components/settings/History.svelte` | "Paid only" switch next to the title, the filter on the list, the auto-loader, and hiding the loading bikes while it waits for "Look further back" |
+| `src/lib/components/settings/HistoryItem.svelte` | The cost under the bike number |
 | `src/lib/components/InfoDialog.svelte` | Update check uses `src/lib/fork.ts` |
 | `src/routes/+page.svelte` | Trip-screen button and the account picker host |
 | `src/lib/translations.ts` | Merges the fork's strings |
@@ -73,6 +77,7 @@ A daily GitHub Action checks for a new Gira+ release. When there is one, it reba
 - Ghost-trip offer.
 - Main account, account labels, and safe switching (the fix for a switch occasionally landing back on the previous account).
 - Smooth switch: pass and balance loaded before the switch, and a fade on the profile header.
+- Paid trips in the history: the cost on paid trips and a "Paid only" switch.
 
 ## Guesses and assumptions
 
@@ -95,6 +100,8 @@ These things were decided without confirmation from EMEL, VAIMOO or Gira+. Each 
 | The pass and balance loaded before a switch follow Gira+'s `getAccountSnapshot` (in `gira-api/api.ts`), copied because Gira+'s version only works for the active session. If upstream changes that function, the copy needs the same change, or after a switch the header can show the pass differently from Gira+. | `snapshotFrom` in `src/lib/account-snapshot.ts` |
 | Waiting up to 3 seconds for the new account's pass and balance is short enough not to feel slow, and long enough for a normal connection. | `SNAPSHOT_WAIT_MS` in `src/lib/accounts.ts` |
 | Checking the other accounts at most every 3 minutes, only when a list is shown, is light enough for EMEL. How EMEL views several accounts checked from one phone is unknown. | `LABEL_MAX_AGE_MS` in `src/lib/account-labels.ts` |
+| A trip is paid when VAIMOO's `tripCost` is above zero, and that cost is in euros (like the balance). Not checked against a real paid trip yet. | `isPaidTrip` and `formatTripCost` in `src/lib/paid-trips.ts` |
+| With "Paid only" on, loading up to 10 pages (150 trips) by itself before asking is light enough for EMEL and enough to find recent paid trips. | `PAID_AUTO_PAGES` in `src/lib/paid-trips.ts` |
 | `allowBackup="false"` keeps saved passwords out of Google cloud backups. On Android 12+, a direct phone-to-phone transfer may still copy app data (not checked). | `android/app/src/main/AndroidManifest.xml` |
 
 ## Known limits

@@ -11,6 +11,9 @@
 	import { getLocale, t } from '$lib/translations';
 	import { errorMessages } from '$lib/ui.svelte';
 	import { reportApiError } from '$lib/error-reporting';
+	import PaidOnlySwitch from '$lib/components/PaidOnlySwitch.svelte';
+	import PaidTripsLoader from '$lib/components/PaidTripsLoader.svelte';
+	import { isPaidTrip } from '$lib/paid-trips';
 
 	let trips:CompletedTrip[] = $state([]);
 	let observed:HTMLDivElement|undefined = $state();
@@ -18,6 +21,9 @@
 	let loading = false;
 	let loadedAll = $state(false);
 	const loadedPerPage = 15;
+	let paidOnly = $state(false);
+	let paidPaused = $state(false);
+	let shown = $derived(paidOnly ? trips.filter(isPaidTrip) : trips);
 
 	async function loadMoreTripHistory() {
 		if (loading || loadedAll) return;
@@ -70,7 +76,7 @@
 		};
 	});
 
-	let aggregate = $derived(Object.entries(trips.reduce((acc, cur) => {
+	let aggregate = $derived(Object.entries(shown.reduce((acc, cur) => {
 		if (cur == null) return acc;
 		const date = cur.startedAt;
 		const key = `${date.getDate()}/${date.getMonth()}/${date.getFullYear()}`;
@@ -85,7 +91,10 @@
 </script>
 
 <MenuPage>
-	<div class="text-3xl font-bold text-info px-5 pt-5">{$t('trips_label')}</div>
+	<div class="flex items-center justify-between px-5 pt-5">
+		<div class="text-3xl font-bold text-info">{$t('trips_label')}</div>
+		<PaidOnlySwitch bind:on={paidOnly} />
+	</div>
 	<!-- Its own request, so it (or its skeleton) shows whether or not the trip list has loaded yet. -->
 	{#if !(didFirstRequest && trips.length == 0) && (summary === undefined || summary?.length)}
 		<div class="px-5 pt-5">
@@ -126,9 +135,12 @@
 			{/each}
 		</div>
 	{/if}
+	{#if paidOnly && trips.length}
+		<PaidTripsLoader load={loadMoreTripHistory} done={loadedAll} found={shown.length} bind:paused={paidPaused} />
+	{/if}
 	{#if !loadedAll}
 		<div class="mx-auto"
-			class:hidden={trips.length == 0}
+			class:hidden={trips.length == 0 || (paidOnly && paidPaused)}
 			style:padding-bottom={$safeInsets.bottom + 'px'}
 			bind:this={observed}>
 			<svg class="w-20 h-12 mb-4" width="62" height="38" viewBox="0 0 62 38" fill="none" xmlns="http://www.w3.org/2000/svg">

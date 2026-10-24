@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { CompletedTrip } from '$lib/gira-api/models';
+	import TripCost from '$lib/components/TripCost.svelte';
 	import { t } from '$lib/translations';
 
 	interface Props {
@@ -86,6 +87,7 @@
 					<circle cx="82.4437" cy="43.5921" r="15.4076" class="stroke-primary" stroke-width="6"/>
 				</svg>
 				<div class="text-primary font-bold text-sm">{trip.bikeId}</div>
+				<TripCost cost={trip.cost} />
 			</div>
 		</div>
 	</div>
