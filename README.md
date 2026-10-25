@@ -1,3 +1,7 @@
+> **Gira+ Multi:** este repositório é uma versão modificada do [Gira+](https://github.com/rt-evil-inc/gira-mais), alterada por AlexandreCRod desde outubro de 2026 para guardar várias contas na mesma aplicação. Não é oficial nem tem qualquer ligação à EMEL ou aos autores do Gira+. As alterações estão descritas em [MULTI_ACCOUNT.md](MULTI_ACCOUNT.md); o resto deste README é o original do Gira+. Mantém-se a licença GPL v3 do Gira+.
+>
+> *A modified version of Gira+, changed by AlexandreCRod since October 2026 to keep several accounts in one app. Unofficial, not affiliated with EMEL or the Gira+ authors. Changes are listed in MULTI_ACCOUNT.md; licensed under Gira+'s GPL v3.*
+
 <p align="center">
   <img src="assets/icon.svg" width="190">
 </p>

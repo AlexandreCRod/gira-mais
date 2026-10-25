@@ -6,6 +6,7 @@ import * as trip from '$lib/trip';
 import * as fallback from '$lib/unlock-fallback';
 import * as ghost from '$lib/ghost-trip';
 import * as accounts from './accounts';
+import { forgetSnapshot, knownSnapshot, rememberSnapshot } from '$lib/account-snapshot';
 import { InvalidCredentialsError } from '$lib/vaimoo-api/client';
 
 const mocks = vi.hoisted(() => ({
@@ -91,6 +92,8 @@ let stopTracking: (() => void) | null = null;
 /** A clean slate for each test: the stores are shared module state, so reset them before tracking starts. */
 async function setup(saved: unknown[] = [], active: typeof ALICE | null = null) {
 	mocks.preferences.clear();
+	forgetSnapshot();
+	account.accountInfo.set(null);
 	if (saved.length) mocks.preferences.set('multi/accounts', JSON.stringify(saved));
 	account.token.set(null);
 	account.userCredentials.set(null);
@@ -181,6 +184,35 @@ describe('switchAccount', () => {
 		expect(mocks.remainingCredit).toHaveBeenCalledWith(expect.objectContaining({ userId: 2 }));
 		expect(get(account.accountInfo)).toEqual({ balance: 4.5, subscription: null });
 		expect(account.refreshAccountInfo).not.toHaveBeenCalled();
+	});
+
+	it('uses a pass and balance seen in the last 3 minutes at once, and lets Gira+ refresh them after', async () => {
+		const { account, accounts } = await setup([ALICE, BOB], ALICE);
+		mocks.refreshVaimooSession.mockResolvedValue(session(2, BOB.email));
+		rememberSnapshot(BOB.email, { balance: -1, subscription: null });
+
+		expect(await accounts.switchAccount(BOB.email)).toBe('ok');
+		expect(mocks.remainingCredit).not.toHaveBeenCalled();
+		expect(get(account.accountInfo)).toEqual({ balance: -1, subscription: null });
+		expect(account.refreshAccountInfo).toHaveBeenCalled();
+	});
+
+	it('waits for the pass and balance again once what it saw is older than 3 minutes', async () => {
+		const { accounts } = await setup([ALICE, BOB], ALICE);
+		mocks.refreshVaimooSession.mockResolvedValue(session(2, BOB.email));
+		rememberSnapshot(BOB.email, { balance: -1, subscription: null }, Date.now() - accounts.SNAPSHOT_REUSE_MS - 1);
+
+		expect(await accounts.switchAccount(BOB.email)).toBe('ok');
+		expect(mocks.remainingCredit).toHaveBeenCalled();
+	});
+
+	it('remembers the pass and balance of the account it leaves', async () => {
+		const { account, accounts } = await setup([ALICE, BOB], ALICE);
+		mocks.refreshVaimooSession.mockResolvedValue(session(2, BOB.email));
+		account.accountInfo.set({ balance: 7, subscription: null } as never);
+
+		expect(await accounts.switchAccount(BOB.email)).toBe('ok');
+		expect(knownSnapshot(ALICE.email)).toEqual({ balance: 7, subscription: null });
 	});
 
 	it('falls back to the pass and balance refresh of Gira+ when the preload fails', async () => {

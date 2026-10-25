@@ -52,3 +52,62 @@ export function swipeDown(node: HTMLElement, onSwipe: () => void) {
 		},
 	};
 }
+
+/** A sideways drag at least this long moves to the next or previous page; a shorter one springs back. */
+export const SIDEWAYS_COMMIT_PX = 60;
+
+type SidewaysHandlers = { move: (dx: number) => void, end: (dx: number) => void };
+
+// A sideways-drag action: move() follows the finger while it's down, end() gets the final distance when it lifts (0
+// if the browser takes the touch away). A drag that starts mostly vertical is left alone, so the page still scrolls.
+export function swipeSideways(node: HTMLElement, handlers: SidewaysHandlers) {
+	let start: { x: number, y: number } | null = null;
+	let dragging = false;
+	let dx = 0;
+
+	const down = (event: PointerEvent) => {
+		start = { x: event.clientX, y: event.clientY };
+		dragging = false;
+		dx = 0;
+	};
+	const move = (event: PointerEvent) => {
+		if (!start) return;
+		dx = event.clientX - start.x;
+		const dy = event.clientY - start.y;
+		if (!dragging) {
+			if (Math.abs(dx) <= TAP_PX) return;
+			if (Math.abs(dx) <= Math.abs(dy)) {
+				start = null;
+				return;
+			}
+			dragging = true;
+			node.setPointerCapture?.(event.pointerId);
+		}
+		handlers.move(dx);
+	};
+	const finish = (cancelled: boolean) => () => {
+		if (dragging) handlers.end(cancelled ? 0 : dx);
+		start = null;
+		dragging = false;
+	};
+	const up = finish(false), cancel = finish(true);
+
+	const listeners: [string, EventListener][] = [
+		['pointerdown', down as EventListener],
+		['pointermove', move as EventListener],
+		['pointerup', up],
+		['pointercancel', cancel],
+	];
+	for (const [type, listener] of listeners) node.addEventListener(type, listener);
+	// Vertical moves still scroll; sideways ones come here instead of going to the browser
+	node.style.touchAction = 'pan-y';
+
+	return {
+		update(next: SidewaysHandlers) {
+			handlers = next;
+		},
+		destroy() {
+			for (const [type, listener] of listeners) node.removeEventListener(type, listener);
+		},
+	};
+}

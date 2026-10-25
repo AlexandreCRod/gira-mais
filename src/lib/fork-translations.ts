@@ -1,13 +1,17 @@
 // Gira+ Multi: strings for the multi-account features, kept apart from upstream's translations so
 // rebases don't conflict. Spread into the translations object in $lib/translations.
 export const forkTranslations = {
-	multi_accounts_title: {
-		en: 'Accounts',
-		pt: 'Contas',
+	multi_new_account_title: {
+		en: 'New account',
+		pt: 'Nova conta',
 	},
-	multi_add_account: {
-		en: 'Add account',
-		pt: 'Adicionar conta',
+	multi_new_account_subtext: {
+		en: 'Add another Gira account',
+		pt: 'Adicionar outra conta Gira',
+	},
+	multi_sign_in: {
+		en: 'Sign in',
+		pt: 'Iniciar sessão',
 	},
 	multi_add_account_title: {
 		en: 'Add an account',
@@ -44,10 +48,6 @@ export const forkTranslations = {
 	multi_main_label: {
 		en: 'Main',
 		pt: 'Principal',
-	},
-	multi_main_hint: {
-		en: 'Press and hold an account to open the app on it.',
-		pt: 'Mantenha premida uma conta para a aplicação abrir com ela.',
 	},
 	multi_trip_running_label: {
 		en: 'Trip running',

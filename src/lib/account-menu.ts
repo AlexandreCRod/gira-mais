@@ -20,3 +20,26 @@ export function closeAccountMenu() {
 	});
 	return open;
 }
+
+/** How long after the closing touch its click can still arrive. */
+const CLICK_WINDOW_MS = 500;
+
+/**
+ * Close the menu from a touch outside it. It closes as soon as the finger lands: after the swipe that opened it the
+ * browser can leave the next tap without a click, which made closing take two taps. The click that does follow can
+ * land on the map under the menu (and pick a station), so it's swallowed.
+ */
+export function closeAccountMenuOnTouch() {
+	closeAccountMenu();
+	const swallow = (event: MouseEvent) => {
+		event.preventDefault();
+		event.stopImmediatePropagation();
+		stop();
+	};
+	const stop = () => {
+		window.removeEventListener('click', swallow, true);
+		clearTimeout(timer);
+	};
+	window.addEventListener('click', swallow, true);
+	const timer = setTimeout(stop, CLICK_WINDOW_MS);
+}

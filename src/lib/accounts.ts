@@ -2,7 +2,7 @@
 // $lib/account exactly as upstream keeps it (one token, one set of credentials); this module keeps the
 // others next to it and swaps them in, so upstream's login and token refresh code stays untouched.
 import { accountInfo, logOut, refreshAccountInfo, token, tokenRefreshInFlight, updateUserInfo, user, userCredentials } from '$lib/account';
-import { accountSnapshotFor } from '$lib/account-snapshot';
+import { accountSnapshotFor, forgetSnapshot, knownSnapshot, rememberSnapshot } from '$lib/account-snapshot';
 import { reportApiError } from '$lib/error-reporting';
 import { stopBackendSync } from '$lib/gira-api/backend-sync';
 import type { AccountSnapshot } from '$lib/gira-api/models';
@@ -40,6 +40,11 @@ const TRIP_ACCOUNT_KEY = 'multi/tripAccount';
 /** How long a switch waits for a token refresh or trip check of the previous account that is already under way. */
 const SETTLE_TIMEOUT_MS = 10_000;
 const SNAPSHOT_WAIT_MS = 3_000;
+/**
+ * A pass and balance seen this recently (by the map menu's check, or when last leaving the account) are shown at
+ * once instead of waiting for them; Gira+'s own refresh then brings them up to date, as after a login.
+ */
+export const SNAPSHOT_REUSE_MS = 3 * 60_000;
 
 export const savedAccounts = writable<SavedAccount[]>([]);
 /** The email of the account the app opens on; null keeps upstream's "the last one used". */
@@ -267,18 +272,21 @@ async function preloadSnapshot(session: VaimooSession): Promise<AccountSnapshot 
 /** Set while activate() swaps the stores, so clearing the previous account's trip doesn't count as the trip ending. */
 let activating = false;
 
-/** Make the account active, the way logging out and back in would but without the login screen in between. */
-function activate(account: SavedAccount, session: VaimooSession, snapshot: AccountSnapshot | null = null) {
+/**
+ * Make the account active, the way logging out and back in would but without the login screen in between. A `fresh`
+ * snapshot was just loaded; any other is refreshed afterwards.
+ */
+function activate(account: SavedAccount, session: VaimooSession, snapshot: AccountSnapshot | null = null, fresh = snapshot !== null) {
 	activating = true;
 	try {
-		swapIn(account, session, snapshot);
+		swapIn(account, session, snapshot, fresh);
 	} finally {
 		activating = false;
 	}
 }
 
 /** With a snapshot loaded beforehand, the profile's pass and balance change together with the name, without a gap. */
-function swapIn(account: SavedAccount, session: VaimooSession, snapshot: AccountSnapshot | null) {
+function swapIn(account: SavedAccount, session: VaimooSession, snapshot: AccountSnapshot | null, fresh: boolean) {
 	stopBackendSync();
 	currentTrip.set(null);
 	tripRating.set({ currentRating: null });
@@ -294,7 +302,7 @@ function swapIn(account: SavedAccount, session: VaimooSession, snapshot: Account
 	});
 	// The saved name stands in until updateUserInfo loads it, so it doesn't flash the email first
 	user.set({ email: session.user.email ?? account.email, name: displayName(session, account.name || account.email) });
-	if (!snapshot) {
+	if (!fresh) {
 		void refreshAccountInfo().catch(error => {
 			console.error('Failed to load VAIMOO account data', error);
 			void reportApiError('account_info_error', error, { source: 'account-switch' });
@@ -321,9 +329,13 @@ export async function switchAccount(email: string): Promise<SwitchResult> {
 			return 'failed';
 		}
 		upsert({ email: target.email, userId: session.userId, refreshToken: session.refreshToken });
-		// Load the pass and balance meanwhile; without them the switch still happens and loads them afterwards
-		const [snapshot] = await Promise.all([preloadSnapshot(session), settleActiveSession()]);
-		activate(target, session, snapshot);
+		const recent = knownSnapshot(target.email, SNAPSHOT_REUSE_MS);
+		// Load the pass and balance meanwhile, unless they were seen recently; without them the switch still happens and
+		// loads them afterwards
+		const [snapshot] = await Promise.all([recent ? null : preloadSnapshot(session), settleActiveSession()]);
+		const leaving = activeEmail(), leavingInfo = get(accountInfo);
+		if (leaving && leavingInfo) rememberSnapshot(leaving, leavingInfo);
+		activate(target, session, snapshot ?? recent, snapshot !== null);
 		return 'ok';
 	} finally {
 		switchingTo.set(null);
@@ -365,6 +377,7 @@ export async function removeAccount(email: string): Promise<SwitchResult> {
 		}
 	}
 	savedAccounts.update(accounts => accounts.filter(account => !sameEmail(account.email, email)));
+	forgetSnapshot(email);
 	const main = get(mainAccount);
 	if (main && sameEmail(main, email)) mainAccount.set(null);
 	if (tripAccount && sameEmail(tripAccount, email)) setTripAccount(null);

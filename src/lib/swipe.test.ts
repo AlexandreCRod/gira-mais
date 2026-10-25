@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { swipeDown } from './swipe';
+import { swipeDown, swipeSideways } from './swipe';
 
 describe('swipeDown', () => {
 	let wrapper: HTMLDivElement;
@@ -55,5 +55,50 @@ describe('swipeDown', () => {
 		drag(0, 60);
 		drag(0, 0);
 		expect(tapped).toHaveBeenCalledOnce();
+	});
+});
+
+describe('swipeSideways', () => {
+	let node: HTMLDivElement;
+	let move: Mock<(dx: number) => void>;
+	let end: Mock<(dx: number) => void>;
+	let action: ReturnType<typeof swipeSideways>;
+
+	beforeEach(() => {
+		node = document.createElement('div');
+		document.body.append(node);
+		move = vi.fn<(dx: number) => void>();
+		end = vi.fn<(dx: number) => void>();
+		action = swipeSideways(node, { move, end });
+	});
+	afterEach(() => {
+		action.destroy();
+		node.remove();
+	});
+
+	const pointer = (type: string, x: number, y: number) => node.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y }));
+	const drag = (dx: number, dy: number, last = 'pointerup') => {
+		pointer('pointerdown', 0, 0);
+		pointer('pointermove', dx / 2, dy / 2);
+		pointer('pointermove', dx, dy);
+		pointer(last, dx, dy);
+	};
+
+	it('follows a sideways drag and reports where it ended', () => {
+		drag(-80, 10);
+		expect(move).toHaveBeenLastCalledWith(-80);
+		expect(end).toHaveBeenCalledExactlyOnceWith(-80);
+	});
+
+	it('leaves taps and mostly vertical drags alone', () => {
+		drag(6, 0);
+		drag(30, 60);
+		expect(move).not.toHaveBeenCalled();
+		expect(end).not.toHaveBeenCalled();
+	});
+
+	it('a cancelled drag ends where it started', () => {
+		drag(80, 0, 'pointercancel');
+		expect(end).toHaveBeenCalledExactlyOnceWith(0);
 	});
 });

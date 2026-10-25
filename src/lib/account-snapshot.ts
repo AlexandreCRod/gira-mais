@@ -21,6 +21,26 @@ export function snapshotFrom(remainingCredit: number, usage: VaimooSubscriptionU
 	};
 }
 
+/** The last pass and balance seen for each saved account, by lower-cased email, with when they were seen. */
+const known = new Map<string, { snapshot: AccountSnapshot, seenAt: number }>;
+
+/** Keep an account's pass and balance from a request the app made anyway (the menu's check, or leaving the account). */
+export function rememberSnapshot(email: string, snapshot: AccountSnapshot, seenAt = Date.now()) {
+	known.set(email.trim().toLowerCase(), { snapshot, seenAt });
+}
+
+/** Forget an account's pass and balance (when it's removed), or every account's without an email. */
+export function forgetSnapshot(email?: string) {
+	if (email === undefined) known.clear();
+	else known.delete(email.trim().toLowerCase());
+}
+
+/** The account's last known pass and balance, if seen within `maxAgeMs`. */
+export function knownSnapshot(email: string, maxAgeMs = Infinity, now = Date.now()): AccountSnapshot | null {
+	const entry = known.get(email.trim().toLowerCase());
+	return entry && now - entry.seenAt <= maxAgeMs ? entry.snapshot : null;
+}
+
 export async function accountSnapshotFor(session: VaimooSession): Promise<AccountSnapshot> {
 	const [credit, usage] = await Promise.all([getVaimooRemainingCredit(session), getVaimooSubscriptionUsage(session)]);
 	return snapshotFrom(credit.remainingCredit, usage);

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 	rememberSession: vi.fn(),
 	getCurrentVaimooTrip: vi.fn(),
 	getVaimooSubscriptionUsage: vi.fn(),
+	getVaimooRemainingCredit: vi.fn(),
 }));
 vi.mock('$lib/accounts', () => ({
 	otherAccounts: () => mocks.others,
@@ -18,9 +19,10 @@ vi.mock('$lib/accounts', () => ({
 vi.mock('$lib/vaimoo-api/client', () => ({
 	getCurrentVaimooTrip: mocks.getCurrentVaimooTrip,
 	getVaimooSubscriptionUsage: mocks.getVaimooSubscriptionUsage,
+	getVaimooRemainingCredit: mocks.getVaimooRemainingCredit,
 }));
 
-import { checkedLabels, LABEL_MAX_AGE_MS, passState, refreshAccountLabels } from './account-labels';
+import { blockedForTrip, checkedLabels, LABEL_MAX_AGE_MS, passState, refreshAccountLabels } from './account-labels';
 
 const usage = (expirationDate: string, isExpired?: boolean) => ({ currentSubscription: { name: 'Anual' }, expirationDate, isExpired });
 
@@ -35,6 +37,16 @@ describe('passState', () => {
 	});
 });
 
+describe('blockedForTrip', () => {
+	it('flags a pass that is not valid or a negative balance, and nothing unknown', () => {
+		expect(blockedForTrip('valid', 0)).toBe(false);
+		expect(blockedForTrip('valid', -0.5)).toBe(true);
+		expect(blockedForTrip('expired', 3)).toBe(true);
+		expect(blockedForTrip('none', null)).toBe(true);
+		expect(blockedForTrip(null, null)).toBe(false);
+	});
+});
+
 describe('refreshAccountLabels', () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -45,12 +57,13 @@ describe('refreshAccountLabels', () => {
 		mocks.signIn.mockResolvedValue({ userId: 2, refreshToken: 'bob-new' });
 		mocks.getCurrentVaimooTrip.mockResolvedValue({ activeTripId: 7 });
 		mocks.getVaimooSubscriptionUsage.mockResolvedValue([usage('2026-01-01T00:00:00Z')]);
+		mocks.getVaimooRemainingCredit.mockResolvedValue({ remainingCredit: -1.2 });
 	});
 	afterEach(() => vi.useRealTimers());
 
 	it('checks the other accounts and keeps their rotated sessions', async () => {
 		await refreshAccountLabels();
-		expect(get(checkedLabels)['bob@example.com']).toMatchObject({ tripRunning: true, pass: 'expired' });
+		expect(get(checkedLabels)['bob@example.com']).toMatchObject({ tripRunning: true, pass: 'expired', balance: -1.2 });
 		expect(mocks.rememberSession).toHaveBeenCalledWith('bob@example.com', { userId: 2, refreshToken: 'bob-new' });
 	});
 

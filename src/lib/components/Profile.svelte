@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { accountInfo, user } from '$lib/account';
-	import { fadeOnAccountChange } from '$lib/account-fade';
-	import { signOutActive } from '$lib/accounts';
-	import AccountSwitcher from '$lib/components/AccountSwitcher.svelte';
+	import ProfileAccounts from '$lib/components/ProfileAccounts.svelte';
+	import ProfileMainCaption from '$lib/components/ProfileMainCaption.svelte';
+	import { newAccountPage, profileHeader, requestSignOut } from '$lib/profile-accounts';
 	import Metric from '$lib/components/Metric.svelte';
 	import ProfileMenuEntry from '$lib/components/ProfileMenuEntry.svelte';
 	import ServiceWarningDialog from '$lib/components/ServiceWarningDialog.svelte';
@@ -10,7 +10,7 @@
 	import History from '$lib/components/settings/History.svelte';
 	import Settings from '$lib/components/settings/Settings.svelte';
 	import { getLocale, t } from '$lib/translations';
-	import { enqueueDialog, errorMessages, safeInsets } from '$lib/ui.svelte';
+	import { enqueueDialog, safeInsets } from '$lib/ui.svelte';
 	import { App } from '@capacitor/app';
 	import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 	import { IconHeart, IconStar } from '@tabler/icons-svelte';
@@ -57,8 +57,9 @@
 			style:padding-top="{Math.max($safeInsets.top, 16)}px" style:padding-bottom="{Math.max($safeInsets.bottom, 24)}px"
 		>
 			<div class="flex flex-col grow justify-center items-center w-full gap-10 pt-9">
-				<div class="flex flex-col justify-center items-center w-full gap-6" use:fadeOnAccountChange>
+				<div class="flex flex-col justify-center items-center w-full gap-6" use:profileHeader>
 					<div class="flex flex-col items-center">
+						<ProfileMainCaption />
 						<div class="font-bold text-primary text-3xl text-center leading-none">
 							{$user?.name ? `${$user.name.split(' ').shift()}${$user.name.includes(' ') ? ` ${$user.name.split(' ').pop()}` : ''}` : $t('user_label')}
 						</div>
@@ -79,7 +80,7 @@
 						<Metric value={$accountInfo?.balance?.toFixed(2) ?? '—'} unit={$accountInfo ? '€' : ''} label={$t('balance_label')} color={($accountInfo?.balance ?? 0) < 0 ? 'warning' : 'info'} />
 					</div>
 				</div>
-				<AccountSwitcher {onclose} />
+				<ProfileAccounts {onclose} />
 				<div class="flex flex-col font-semibold px-2 gap-3 w-full">
 					<ProfileMenuEntry icon={IconHistory} text={$t('history_label')} subtext={$t('history_subtext')} onclick={() => openPage = 'history'} />
 					<ProfileMenuEntry icon={IconTool} text={$t('settings_label')} subtext={$t('settings_subtext')} onclick={() => openPage = 'settings'} />
@@ -92,7 +93,7 @@
 					{/if}
 				</div>
 			</div>
-			<button class="flex flex-col items-center mb-3" onclick={() => { onclose(); void signOutActive().then(result => { if (result !== 'ok') errorMessages.add($t('multi_switch_failed'), 5000); }); }}>
+			<button class="flex flex-col items-center mb-3" style:visibility={$newAccountPage ? 'hidden' : null} onclick={requestSignOut}>
 				<IconLogout2 class="text-primary mr-2" size={32} />
 				<span class="text-2xs font-semibold text-label text-center leading-none max-w-[70px]">{$t('exit_label')}</span>
 			</button>
