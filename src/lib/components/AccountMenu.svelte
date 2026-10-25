@@ -32,7 +32,7 @@
 
 {#if $accountMenu}
 	<button transition:fade={{ duration: 150 }} class="fixed inset-0 z-40 cursor-default" aria-label={$t('multi_close_menu')} onclick={closeAccountMenu}></button>
-	<div transition:scale={{ duration: 150, start: 0.95 }} class="fixed z-50 w-72 max-w-[calc(100vw-32px)] p-1 flex flex-col bg-background dark:bg-background-secondary rounded-2xl origin-top-right"
+	<div transition:scale={{ duration: 150, start: 0.95 }} class="fixed z-50 w-max min-w-48 max-w-[calc(100vw-32px)] p-1 flex flex-col bg-background dark:bg-background-secondary rounded-2xl origin-top-right"
 		style:top="{$accountMenu.top + 4}px" style:right="{$accountMenu.right}px" style:box-shadow="0px 0px 20px 0px var(--color-shadow)"
 	>
 		{#if warnAboutTrip}

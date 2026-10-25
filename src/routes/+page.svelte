@@ -32,7 +32,7 @@
 	import { startArrivalSharing } from '$lib/arrival-sharing';
 	import AccountPickerHost from '$lib/components/AccountPickerHost.svelte';
 	import TripAccountButton from '$lib/components/TripAccountButton.svelte';
-	import AccountHold from '$lib/components/AccountHold.svelte';
+	import AccountSwipe from '$lib/components/AccountSwipe.svelte';
 	import AccountMenu from '$lib/components/AccountMenu.svelte';
 	import { closeAccountMenu } from '$lib/account-menu';
 
@@ -129,7 +129,7 @@
 	</Floating>
 
 	<Floating right={16} y={tripStatusHeight} offset={16}>
-		<AccountHold><ProfileButton onclick={() => profileOpen = true}/></AccountHold>
+		<AccountSwipe><ProfileButton onclick={() => profileOpen = true}/></AccountSwipe>
 	</Floating>
 
 	<Floating right={20} y={Math.max(tripStatusHeight + 16, $safeInsets.top)} offset={70}>

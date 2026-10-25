@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { accountMenu, closeAccountMenu, openAccountMenu } from './account-menu';
 
 describe('account menu', () => {
-	it('hangs from the held button and closes once', () => {
+	it('hangs from the swiped button and closes once', () => {
 		const button = document.createElement('div');
 		button.getBoundingClientRect = () => ({ bottom: 80, right: window.innerWidth - 16 } as DOMRect);
 		openAccountMenu(button);
