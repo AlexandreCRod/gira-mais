@@ -85,6 +85,7 @@ A daily GitHub Action checks for a new Gira+ release. When there is one, it reba
 - Larger "Paid only" switch; quick switch by holding the map's profile button; the map credits strip no longer covers the location button.
 - The quick switch opens with a swipe down instead of a hold, and its menu fits the names; the credits' info button lines up with the location button and stays put when the credits close.
 - The account list leaves the profile page: the profile's top part swipes between accounts, with an empty profile at the end to add one, hold for main, and "Exit" asking before removing. The credits' info button is back in the corner and the open credits grow from it. The map's account menu closes with one tap outside, and that tap no longer reaches the map underneath. On a profile swipe the next account's name slides in at once. In the map menu, an orange icon marks an account that can't start a trip (no valid pass or a negative balance); the background check now also asks for each account's balance. The README says this is a modified, unofficial fork. Profile switches show the last known pass and balance at once and skip the wait when those are under 3 minutes old.
+- The profile's "Main" caption no longer flickers on a swipe between the main account and another: it fades only when the hold turns it on or off, and a switch shows or hides it at once.
 
 ## Guesses and assumptions
 
